@@ -1,0 +1,36 @@
+name: Daily Market Data Update
+
+on:
+  schedule:
+    - cron: "30 0 * * *"   # KST 09:30
+  workflow_dispatch:
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: pip install yfinance pandas numpy
+
+    - name: Update FX history
+      run: python scripts/update_fx_history.py
+
+    - name: Build auto market data file
+      run: python scripts/fetch_market_data.py
+
+    - name: Commit changes
+      run: |
+        git config user.name "aurora-bot"
+        git config user.email "bot@example.com"
+        git add .
+        git commit -m "Daily auto-update"
+        git push
