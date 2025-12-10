@@ -21,11 +21,11 @@ jobs:
         python -m pip install --upgrade pip
         pip3 install yfinance pandas numpy scipy requests
 
-    - name: Update FX Rolling History
-      run: python scripts/update_fx_history.py
-
-    - name: Fetch Raw Market Data
-      run: python scripts/fetch_market_data.py
+    - name: Fetch Market Data (Including FRED API Data)
+      env:
+        FRED_API_KEY: ${{ secrets.FRED_API_KEY }}  # Secrets에서 환경 변수로 가져오기
+      run: |
+        python scripts/fetch_market_data.py  # FRED API 호출
 
     - name: Build Final Market Data JSON
       run: python scripts/build_market_json.py
