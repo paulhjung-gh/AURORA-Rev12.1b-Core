@@ -3,7 +3,7 @@ import os
 import json
 
 # FRED API Key (GitHub Secrets에서 가져옴)
-FRED_API_KEY = os.getenv("FRED_API_KEY")
+FRED_API_KEY = cfbd6d50f04185cacd4a46310bc8448e
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 def fetch_fred_data(series_id):
