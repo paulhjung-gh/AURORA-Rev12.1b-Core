@@ -1,5 +1,4 @@
 import requests
-import os
 import json
 
 # FRED API Key (GitHub Secrets에서 가져옴)
@@ -32,6 +31,11 @@ def fetch_fred_data(series_id):
     except requests.exceptions.RequestException as e:
         print(f"[ERROR] FRED API 호출 중 오류 발생: {e}")
         return []
+
+# 호출 예시
+series_id = "BAMLH0A0HYM2"  # 시리즈 ID 예시
+data = fetch_fred_data(series_id)
+print(data)
 
 def fetch_all():
     """
