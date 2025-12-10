@@ -30,8 +30,8 @@ jobs:
     - name: Build Final Market Data JSON
       run: python scripts/build_market_json.py
 
-#    - name: (Optional) Run AURORA Engine
-#      run: python scripts/run_engine_auto.py
+    - name: (Optional) Run AURORA Engine
+      run: python scripts/run_engine_auto.py
 
     - name: Commit and Push
       run: |
