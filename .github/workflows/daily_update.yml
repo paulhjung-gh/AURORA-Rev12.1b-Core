@@ -13,11 +13,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-- name: Install dependencies
-  run: |
-    python3 -m pip install --upgrade pip
-    pip3 install yfinance pandas numpy scipy
-
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip3 install yfinance pandas numpy scipy
 
     - name: Update FX Rolling History
       run: python scripts/update_fx_history.py
