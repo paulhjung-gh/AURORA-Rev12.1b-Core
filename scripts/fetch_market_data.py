@@ -1,75 +1,59 @@
 import json
 from pathlib import Path
 import yfinance as yf
-import pandas as pd
-import requests
 
-OUTPUT_PATH = Path("data/market_data_auto.json")
+OUTPUT_PATH = Path("data/raw_today.json")
 
-def fred(series):
-    url = f"https://api.stlouisfed.org/fred/series/observations"
-    # (주의: FRED는 key 필요하지만 Grok은 대체가능, GitHub Actions에서는 key 필요)
-    return None  # placeholder
-
-def fetch_yahoo(ticker, period="1d"):
-    return yf.download(ticker, period=period, progress=False)
+def fetch_yahoo_price(ticker, period="1d"):
+    df = yf.download(ticker, period=period, progress=False)
+    return float(df["Close"].iloc[-1])
 
 def fetch_all():
     data = {}
 
-    # ================ FX ===================
-    fx_full = fetch_yahoo("KRW=X", period="1y")["Close"]
-    data["fx"] = {
-        "usdkrw": float(fx_full.iloc[-1]),
-        "usdkrw_history_130d": fx_full.tail(130).tolist(),
-        "usdkrw_history_21d": fx_full.tail(21).tolist(),
-    }
-
-    # ================ SPX ===================
-    spx_full = fetch_yahoo("^GSPC", period="5y")["Close"]
+    # SPX
+    spx = yf.download("^GSPC", period="5y", progress=False)["Close"]
     data["spx"] = {
-        "index_level": float(spx_full.iloc[-1]),
-        "history_3y": spx_full.tail(1095).tolist(),
+        "index_level": float(spx.iloc[-1]),
+        "history_3y": spx.tail(1095).tolist()
     }
 
-    # ================ VIX ===================
+    # Risk
     data["risk"] = {
-        "vix": float(fetch_yahoo("^VIX")["Close"].iloc[-1]),
-        # HY OAS는 API key 필요. Manual or Grok 방식 권장.
-        "hy_oas": None
+        "vix": fetch_yahoo_price("^VIX"),
+        "hy_oas": None  # API Key 필요, Actions에서 placeholder 유지
     }
 
-    # ================ Rates ===================
+    # Rates (FRED API Key 필요)
     data["rates"] = {
         "dgs2": None,
         "dgs10": None,
         "ffr_upper": None
     }
 
-    # ================ Macro ===================
+    # Macro
     data["macro"] = {
         "ism_pmi": None,
         "pmi_markit": None,
         "cpi_yoy": None,
-        "unemployment": None,
+        "unemployment": None
     }
 
-    # ================ ETF Prices ===================
+    # ETFs
     etfs = ["VOO", "QQQ", "SCHD", "SGOV", "VWO", "XLE", "GLD", "GLDM"]
-    etf_prices = {}
+    etf_data = {}
     for t in etfs:
-        px = fetch_yahoo(t)["Close"].iloc[-1]
-        etf_prices[t] = float(px)
-
-    data["etf"] = etf_prices
+        etf_data[t] = fetch_yahoo_price(t)
+    data["etf"] = etf_data
 
     return data
 
 def main():
     data = fetch_all()
+    OUTPUT_PATH.parent.mkdir(exist_ok=True)
     with OUTPUT_PATH.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    print("[OK] market_data_auto.json created.")
+    print("[OK] raw_today.json created")
 
 if __name__ == "__main__":
     main()
