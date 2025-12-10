@@ -1,4 +1,4 @@
-name: Daily Market Data Update
+name: AURORA Daily Auto Update
 
 on:
   schedule:
@@ -6,31 +6,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-data:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v3
 
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: 3.10
 
     - name: Install dependencies
       run: pip install yfinance pandas numpy
 
-    - name: Update FX history
+    - name: Update FX Rolling History
       run: python scripts/update_fx_history.py
 
-    - name: Build auto market data file
+    - name: Fetch Raw Market Data
       run: python scripts/fetch_market_data.py
 
-    - name: Commit changes
+    - name: Build Final Market Data JSON
+      run: python scripts/build_market_json.py
+
+    - name: (Optional) Run AURORA Engine
+      run: python scripts/run_engine_auto.py
+
+    - name: Commit and Push
       run: |
         git config user.name "aurora-bot"
         git config user.email "bot@example.com"
         git add .
-        git commit -m "Daily auto-update"
+        git commit -m "Daily automated update"
         git push
