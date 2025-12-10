@@ -1,8 +1,14 @@
 import json
 from pathlib import Path
 from datetime import datetime
+import sys
+
+# repo root 를 path 에 추가
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from engine.AuroraX_Rev12_1b_Engine import AuroraX121
+
 
 def main():
     today = datetime.now().strftime("%Y%m%d")
