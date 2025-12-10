@@ -14,7 +14,10 @@ def get_close_series(ticker: str, period: str = "1d") -> pd.Series:
     """
     df = yf.download(ticker, period=period, progress=False)
 
-    # MultiIndex / DataFrame 모두 커버
+    print(f"=== DEBUG get_close_series for {ticker} ===")
+    print("Downloaded type :", type(df))
+    print("Downloaded cols :", df.columns)
+
     if isinstance(df, pd.DataFrame):
         if "Close" in df.columns:
             close = df["Close"]
@@ -23,7 +26,6 @@ def get_close_series(ticker: str, period: str = "1d") -> pd.Series:
     else:
         close = pd.Series(df)
 
-    # Close가 DataFrame이면 첫 컬럼만 사용
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
 
@@ -34,21 +36,21 @@ def get_close_series(ticker: str, period: str = "1d") -> pd.Series:
 def fetch_all() -> dict:
     data: dict = {}
 
-    print("=== AURORA FETCH MARKET v2 ===")
+    print("=== AURORA FETCH MARKET SCRIPT v3 ===")
 
     # ========== SPX ==========
     spx = get_close_series("^GSPC", period="5y")
     print("[SPX] len:", len(spx))
     data["spx"] = {
         "index_level": float(spx.iloc[-1]),
-        "history_3y": spx.tail(1095).tolist(),  # 이제 spx 는 Series라 안전
+        "history_3y": spx.tail(1095).tolist(),
     }
 
     # ========== Risk ==========
     vix = get_close_series("^VIX", period="1y")
     data["risk"] = {
         "vix": float(vix.iloc[-1]),
-        "hy_oas": None,  # FRED API 연동 전까지는 placeholder
+        "hy_oas": None,  # FRED API 연동 전까지 placeholder
     }
 
     # ========== Rates (placeholder) ==========
