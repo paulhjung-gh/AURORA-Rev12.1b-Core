@@ -1,0 +1,183 @@
+{
+  "meta": {
+    "engine_version": "AURORA Rev12.1b",
+    "description": "Deterministic RuleSet for FXW, MacroScore, Drawdown, FXVol, ML, Systemic, State, SGOV Floor, Satellite, Duration, CMA, CoreEquity.",
+    "last_updated": "2025-12-10"
+  },
+
+  "fxw": {
+    "description": "FXW = sigmoid(latest_fx - KDE anchor) using last 130 trading days of USD/KRW.",
+    "window_days": 130,
+    "sigmoid": {
+      "formula": "FXW = 1 / (1 + exp(alpha * (latest_fx - anchor)))",
+      "alpha": 0.01
+    }
+  },
+
+  "macro_score": {
+    "description": "MacroScore is FD score using ISM, PMI, CPI YoY, Unemployment.",
+    "inputs": ["ism_pmi", "pmi_markit", "cpi_yoy", "unemployment"],
+    "scale": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "weights": {
+      "ism_pmi": 0.30,
+      "pmi_markit": 0.20,
+      "cpi_yoy": 0.25,
+      "unemployment": 0.25
+    }
+  },
+
+  "drawdown": {
+    "description": "3-year SPX long-horizon drawdown based on last 1095 closes.",
+    "window_days": 1095,
+    "formula": "dd = (current - peak) / peak",
+    "clip": {
+      "min": -0.90,
+      "max": 0.00
+    }
+  },
+
+  "fx_vol": {
+    "description": "21-day log-return sigma of USD/KRW (non-annualized).",
+    "window_days": 21,
+    "formula": "sigma = std(log(fx_t / fx_t-1)) over 21 days",
+    "clip": {
+      "min": 0.0,
+      "max": 0.05
+    },
+    "high_vol_threshold": 0.02
+  },
+
+  "ml_layer": {
+    "description": "Deterministic ML_Risk / ML_Opp / ML_Regime from VIX, HY_OAS, FXW, Drawdown, YieldCurve.",
+    "inputs": ["vix", "hy_oas", "fxw", "drawdown", "yield_curve_spread"],
+    "risk": {
+      "scale": [0.0, 1.0],
+      "higher_vix_increase": true,
+      "higher_hy_oas_increase": true,
+      "larger_drawdown_increase": true,
+      "steep_negative_yield_curve_increase": true
+    },
+    "opp": {
+      "scale": [0.0, 1.0],
+      "formula_hint": "Opp is higher when valuations are attractive (moderate drawdown, non-crisis risk)."
+    },
+    "regime": {
+      "classes": ["R0_NORMAL", "R1_MILD", "R2_STRESS", "R3_CRISIS"]
+    }
+  },
+
+  "systemic": {
+    "description": "SystemicLevel uses HY_OAS, YieldCurve, MacroScore, ML_Regime, Long Drawdown.",
+    "range": [0.0, 1.0],
+    "bucket_thresholds": {
+      "C0": 0.55,
+      "C1": 0.69,
+      "C2": 0.79,
+      "C3": 1.00
+    }
+  },
+
+  "state": {
+    "description": "State engine S0/S1/S2/S3_SOFT/S3_HARD/S7 based on FXW, VIX, FXVol, ML_Risk, Systemic.",
+    "states": ["S0_NORMAL", "S1_MILD", "S2_HIGH_VOL", "S3_SOFT", "S3_HARD", "S7_REPAIR"],
+    "triggers": {
+      "fx_vol_high": 0.02,
+      "vix_high": 25.0
+    }
+  },
+
+  "sgov_floor": {
+    "description": "SGOV Floor based on FFR_Upper, FXW, ML_Risk, Systemic, FX K-penalty.",
+    "base": {
+      "formula": "base = max(0.22, 0.7 * (ffr_upper / 100.0))",
+      "min": 0.22,
+      "max": 0.80
+    },
+    "penalties": {
+      "fx_penalty": {
+        "formula": "fx_pen = (1 - FXW) * 0.12"
+      },
+      "k_penalty": {
+        "fx_1550_1600": 0.02,
+        "fx_ge_1600": 0.05
+      },
+      "ml_penalty": {
+        "formula": "max(0, ML_Risk - 0.60) * 0.08"
+      },
+      "systemic_penalty": {
+        "C0": 0.00,
+        "C1": 0.05,
+        "C2": 0.10,
+        "C3": 0.20
+      }
+    },
+    "bounds": {
+      "min_floor": 0.22,
+      "max_floor": 0.80
+    }
+  },
+
+  "satellite": {
+    "description": "Satellite = EM + ENERGY, internal ratio 2:1, base 3%, max 9%.",
+    "ratio": {
+      "em": 2,
+      "energy": 1
+    },
+    "base": 0.03,
+    "max": 0.09,
+    "clamp_systemic_if": ["C1", "C2", "C3"],
+    "clamped_value": 0.03,
+    "expansion_conditions": {
+      "allowed_states": ["S0_NORMAL", "S1_MILD"],
+      "systemic_must_be": ["C0"],
+      "fxw_min": 0.55,
+      "ml_risk_max": 0.50,
+      "ml_opp_min": 0.60
+    }
+  },
+
+  "duration": {
+    "description": "Duration exposure allowed only in S0/S1 between 5% and 15%.",
+    "range": [0.0, 0.15],
+    "allowed_states": ["S0_NORMAL", "S1_MILD"],
+    "activation": {
+      "macro_score_min": 0.70,
+      "fxw_min": 0.55,
+      "ml_risk_max": 0.50
+    },
+    "base_target": 0.05,
+    "max_target": 0.15
+  },
+
+  "cma": {
+    "description": "CMA deployment is external capital, never changes portfolio % weights.",
+    "conditions": {
+      "drawdown_min": 0.10,
+      "fxw_min": 0.35,
+      "ml_opp_min": 0.65,
+      "ml_risk_max": 0.90,
+      "allowed_states": ["S0_NORMAL", "S1_MILD"]
+    },
+    "risk_adjustment": {
+      "ml_risk_high_threshold": 0.75,
+      "deployment_factor_if_high": 0.5
+    }
+  },
+
+  "core_equity": {
+    "description": "Core Equity weights are immutable and applied to remaining Core bucket.",
+    "weights": {
+      "spx": 0.525,
+      "ndx": 0.245,
+      "div": 0.230
+    }
+  },
+
+  "gold": {
+    "description": "Gold is engine-neutral but portfolio-level 5% target with monthly 100k KRW via ISA + optional top-up.",
+    "target_weight": 0.05
+  }
+}
