@@ -5,8 +5,8 @@ permissions:
 
 on:
   schedule:
-    - cron: "30 0 * * *"
-  workflow_dispatch:
+    - cron: "30 9 * * *"  # 매일 오전 9:30에 실행
+  workflow_dispatch:  # 수동 실행 가능
 
 jobs:
   build:
@@ -18,7 +18,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python3 -m pip install --upgrade pip
+        python -m pip install --upgrade pip
         pip3 install yfinance pandas numpy scipy requests
 
     - name: Update FX Rolling History
@@ -30,7 +30,8 @@ jobs:
     - name: Build Final Market Data JSON
       run: python scripts/build_market_json.py
 
-    - name: (Optional) Run AURORA Engine
+    # Run the Aurora engine automatically
+    - name: Run AURORA Engine
       run: python scripts/run_engine_auto.py
 
     - name: Commit and Push
