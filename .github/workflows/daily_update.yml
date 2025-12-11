@@ -34,10 +34,19 @@ jobs:
     - name: Run AURORA Engine
       run: python scripts/run_engine_auto.py
 
-    - name: Commit and Push
-      run: |
-        git config user.name "aurora-bot"
-        git config user.email "bot@example.com"
-        git add .
-        git commit -m "Daily automated update"
-        git push
+- name: Commit and Push
+  run: |
+    git config user.name "aurora-bot"
+    git config user.email "aurora-bot@example.com"
+
+    # 변경 사항이 있는지 먼저 확인
+    if git diff --quiet; then
+      echo "No changes to commit."
+      exit 0
+    else
+      echo "Changes detected. Committing..."
+      git add data/ market_data_fred.json
+      git commit -m "Daily automated update"
+      git push
+    fi
+
