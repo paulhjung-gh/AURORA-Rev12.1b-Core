@@ -181,12 +181,11 @@ def compute_drawdown(spx_block: Dict[str, Any]) -> float:
 def compute_spx_drawdown_10y() -> float:
     """
     10Y SPX long-horizon drawdown 계산.
-    Japan-proof 용도로 사용. yfinance에서 직접 10년치 ^GSPC 종가를 가져온다.
+    Japan-proof 용도로 사용. yfinance에서 10년치 ^GSPC 종가를 가져온다.
     """
     try:
         import yfinance as yf
     except ImportError:
-        # yfinance 가 없는 환경이면 보수적으로 0.0 사용
         return 0.0
 
     data = yf.download("^GSPC", period="10y", progress=False)
