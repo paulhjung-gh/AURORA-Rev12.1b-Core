@@ -86,29 +86,41 @@ class Decision:
 
 # ==================== KDE 동적 Anchor 클래스 ====================
 class KDE_AdaptiveFXW:
-    def __init__(self, window: int = 130):
+    def __init__(self, window: int = 130, alpha: float = 0.01):
+        # 최근 FX 샘플 최대 130개까지 사용
         self.window = window
+        self.alpha = alpha
         self.buffer = deque(maxlen=window)
-        self.alpha = 0.01
 
-    def add(self, fx: float):
-        self.buffer.append(fx)
+    def add(self, fx: float) -> None:
+        """FX 시계열 한 점을 추가."""
+        try:
+            self.buffer.append(float(fx))
+        except (TypeError, ValueError):
+            # 이상치/None 들어오면 그냥 무시
+            return
 
-def fxw(self, fx: float) -> float:
-    # 샘플이 2개 미만이면 anchor = 현재 fx 자체 (1480 폐기)
-    if len(self.buffer) < 2:
-        anchor = fx
-    else:
-        data = np.array(self.buffer)
+    def fxw(self, fx: float) -> float:
+        """
+        FXW = sigmoid(alpha * (fx - anchor))
+        - 샘플이 2개 미만이면 anchor = 현재 fx 값 (완전 중립 0.5)
+        - 샘플이 2개 이상이면 KDE 기반 앵커 사용
+        """
+        # 샘플이 부족하면 데이터 기반이지만 중립적인 상태로 시작
+        if len(self.buffer) < 2:
+            anchor = float(fx)
+        else:
+            data = np.asarray(self.buffer, dtype=float)
+            # KDE 기반 앵커
+            kde = gaussian_kde(data)
+            x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
+            density = kde(x)
+            anchor = float(x[np.argmax(density)])
 
-        # KDE anchor 계산
-        kde = gaussian_kde(data)
-        x = np.linspace(data.min() - 100, data.max() + 100, 1000)
-        density = kde(x)
-        anchor = x[np.argmax(density)]
-
-    raw = self.alpha * (fx - anchor)
-    return max(0.0, min(1.0, 1.0 / (1.0 + math.exp(raw))))
+        raw = self.alpha * (float(fx) - anchor)
+        # 로지스틱 스쿼싱으로 [0,1] 범위
+        fxw_val = 1.0 / (1.0 + math.exp(raw))
+        return max(0.0, min(1.0, fxw_val))
 
 
 # ========================= 메인 엔진 클래스 =========================
