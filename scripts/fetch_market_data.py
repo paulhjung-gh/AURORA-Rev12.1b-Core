@@ -204,4 +204,4 @@ def save_to_json(data: Dict[str, Any], filename: str) -> None:
 
 if __name__ == "__main__":
     md = fetch_all()
-    save_to_json(md, "market_data_fred.json")
+    save_to_json(md, "data/market_data_fred.json")
