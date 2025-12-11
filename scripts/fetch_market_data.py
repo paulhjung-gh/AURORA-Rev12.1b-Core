@@ -63,13 +63,13 @@ def compute_cpi_yoy(cpi_series: List[float]) -> float:
 
     return (latest / year_ago - 1.0) * 100.0
 
-
 def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
     """
     S&P Global US Manufacturing PMI 값을 Trading Economics 페이지에서 스크래핑.
     - URL: https://tradingeconomics.com/united-states/manufacturing-pmi
     - 반환: (latest_value, historical_list)
-    실패 시 예외 발생 → 워크플로우 전체 실패 (PMI는 필수 FD 입력).
+    latest 값은 반드시 있어야 하며, 없으면 MarketDataError 발생.
+    historical 은 실패해도 워크플로우를 죽이지 않고 빈 리스트 허용.
     """
     url = "https://tradingeconomics.com/united-states/manufacturing-pmi"
     headers = {
@@ -79,54 +79,64 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
     try:
         resp = requests.get(url, headers=headers, timeout=20)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        html = resp.text
+        soup = BeautifulSoup(html, "html.parser")
 
-        # 1) 상단 설명문에서 첫 번째 숫자 = 최신 PMI
-        # 예: "Manufacturing PMI in the United States decreased to 52.2 points in November ..."
-        headline = soup.find("h1")
-        if not headline or not headline.text:
-            raise MarketDataError("PMI 헤드라인(h1)을 찾지 못했습니다.")
+        # ------------------------------------------------------------------
+        # 1) 최신 값: 본문 문장 전체에서 패턴 검색
+        #    예: "Manufacturing PMI in the United States decreased to 52.20 points in November..."
+        # ------------------------------------------------------------------
+        text_all = " ".join(soup.stripped_strings)
 
-        head_text = headline.get_text(strip=True)
-        m = re.search(r"([-+]?\d+(?:\.\d+)?)", head_text)
+        m = re.search(
+            r"Manufacturing PMI in the United States[^0-9\-+]*([-+]?\d+(?:\.\d+)?)\s*points",
+            text_all,
+        )
         if not m:
-            raise MarketDataError(f"PMI 헤드라인에서 숫자를 찾지 못했습니다: {head_text}")
+            # fallback: "United States Manufacturing PMI ... 52.2" 같은 패턴
+            m = re.search(
+                r"United States Manufacturing PMI[^0-9\-+]*([-+]?\d+(?:\.\d+)?)",
+                text_all,
+            )
+
+        if not m:
+            raise MarketDataError(
+                f"PMI 본문에서 숫자를 찾지 못했습니다: {text_all[:120]}..."
+            )
+
         latest_value = float(m.group(1))
 
-        # 2) Historical 테이블에서 최근 12개 값 추출
-        table = soup.find("table", {"id": "calendar"}) or soup.find(
-            "table", {"id": "tb_calendar"}
-        )
-        if not table:
-            raise MarketDataError("PMI historical 테이블(calendar/tb_calendar)을 찾지 못했습니다.")
-
+        # ------------------------------------------------------------------
+        # 2) Historical 12개월: 안 되면 경고만 찍고 빈 리스트 허용
+        # ------------------------------------------------------------------
         historical: List[float] = []
-        rows = table.find_all("tr")
+        try:
+            table = soup.find("table", {"id": "calendar"}) or soup.find(
+                "table", {"id": "tb_calendar"}
+            )
+            if table:
+                rows = table.find_all("tr")
+                for row in rows[1:13]:  # 헤더 제외 후 12개 행
+                    cells = row.find_all("td")
+                    if not cells:
+                        continue
 
-        # 첫 행은 헤더, 이후 12개 행만 사용
-        for row in rows[1:13]:
-            cells = row.find_all("td")
-            if not cells:
-                continue
-
-            value_str = None
-            for cell in cells:
-                txt = cell.get_text(strip=True)
-                # "52.2" 같은 값만 잡는다
-                if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", txt):
-                    value_str = txt
-                    break
-
-            if value_str is None:
-                continue
-
-            try:
-                historical.append(float(value_str))
-            except ValueError:
-                continue
-
-        if not historical:
-            raise MarketDataError("PMI historical 값을 하나도 추출하지 못했습니다.")
+                    value_str = None
+                    for cell in cells:
+                        txt = cell.get_text(strip=True)
+                        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", txt):
+                            value_str = txt
+                            break
+                    if value_str is None:
+                        continue
+                    try:
+                        historical.append(float(value_str))
+                    except ValueError:
+                        continue
+            else:
+                print("[WARN] PMI historical 테이블(calendar/tb_calendar)을 찾지 못했습니다.")
+        except Exception as e:
+            print(f"[WARN] PMI historical 파싱 실패, latest만 사용합니다: {e}")
 
         return latest_value, historical
 
@@ -137,6 +147,8 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
 def fetch_all() -> Dict[str, Any]:
     """
     FRED + PMI 모든 시계열을 수집.
+    - latest: 엔진 FD 입력에 바로 쓰는 값
+    - history: 필요한 최소 구간만 보관 (옵션)
     어떤 시리즈라도 비어 있으면 예외를 던진다.
     """
     hy_oas_data = fetch_fred_data("BAMLH0A0HYM2")   # HY OAS (bps)
@@ -160,25 +172,27 @@ def fetch_all() -> Dict[str, Any]:
     cpi_yoy = compute_cpi_yoy(cpi_index_data)
     pmi_latest, pmi_hist = fetch_sp_global_pmi()
 
+    latest = {
+        "hy_oas_bps": hy_oas_data[-1],
+        "dgs2": dgs2_data[-1],
+        "dgs10": dgs10_data[-1],
+        "ffr_upper": ffr_data[-1],
+        "cpi_yoy": cpi_yoy,
+        "unemployment": unemployment_data[-1],
+        "pmi_markit": pmi_latest,
+    }
+
+    history = {
+        # 필요시 쓸 수 있는 최소 범위만 저장 (엔진이 직접 쓰진 않지만 참고용)
+        "pmi_12m": pmi_hist[-12:],           # 최대 12개
+        "cpi_13m": cpi_index_data[-13:],     # YoY 계산용 13개월
+        "dgs2_30d": dgs2_data[-30:],         # 최근 1개월 금리
+        "dgs10_30d": dgs10_data[-30:],       # 최근 1개월 금리
+    }
+
     return {
-        "series": {
-            "HY_OAS": hy_oas_data,
-            "DGS2": dgs2_data,
-            "DGS10": dgs10_data,
-            "FFR": ffr_data,
-            "CPI_Index": cpi_index_data,
-            "Unemployment": unemployment_data,
-            "SP_PMI_History": pmi_hist,
-        },
-        "latest": {
-            "hy_oas_bps": hy_oas_data[-1],
-            "dgs2": dgs2_data[-1],
-            "dgs10": dgs10_data[-1],
-            "ffr_upper": ffr_data[-1],
-            "cpi_yoy": cpi_yoy,
-            "unemployment": unemployment_data[-1],
-            "pmi_markit": pmi_latest,
-        },
+        "latest": latest,
+        "history": history,
     }
 
 
