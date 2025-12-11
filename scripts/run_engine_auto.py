@@ -364,19 +364,16 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 def compute_cma_section(sig: Dict[str, float]) -> Dict[str, Any]:
     """
     FD / ML / Systemic 신호(sig)를 받아 CMA TAS 결과 dict를 반환.
-    - 아직 State 엔진이 노출되지 않았으므로, 임시로 state="S0" 가정.
-    - dd_10y 데이터가 없으므로, 당장은 3Y DD를 그대로 사용.
-      (향후 10Y price series가 들어오면 해당 부분만 교체)
     """
     vix = sig["vix"]
     hy_oas = sig["hy_oas"]
-    dd_3y = sig["drawdown"]          # engine convention: -0.25 = -25%
-    dd_10y = sig.get("dd_10y", dd_3y)  # TODO: 10Y series 도입 시 교체
+    dd_3y = sig["drawdown"]             # engine convention: -0.25 = -25%
+    dd_10y = sig.get("dd_10y", dd_3y)   # TODO: 10Y series 도입 시 교체
     ml_risk = sig["ml_risk"]
     systemic_bucket = sig["systemic_bucket"]
 
-    # 임시 state: S0 가정 (정식 State 엔진 연동 시 이 부분만 교체)
-    state_name = "S0"
+    # 새 State 결정 로직 사용
+    state_name = determine_state_from_signals(sig)
 
     tas_input = CmaTasInput(
         vix=vix,
@@ -428,11 +425,16 @@ def main():
     # 결과를 JSON 으로 저장 (Level-4 자동화 대비)
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
+    state_name = determine_state_from_signals(sig)
+
     out = {
         "date": today,
-        "signals": sig,
+        "signals": {
+            **sig,
+            "state": state_name,
+        },
         "weights": weights,
-        "cma": cma,  # CMA TAS 결과 포함
+        "cma": cma,
     }
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
