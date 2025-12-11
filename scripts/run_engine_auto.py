@@ -2,6 +2,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
+from aurora.strategy.cma_tas import CmaTasInput, compute_cma_tas
 from datetime import datetime  # datetime 사용 위해 추가
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -357,10 +358,52 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
+# ==== CMA TAS Dynamic Threshold 연동 ====
+
+
+def compute_cma_section(sig: Dict[str, float]) -> Dict[str, Any]:
+    """
+    FD / ML / Systemic 신호(sig)를 받아 CMA TAS 결과 dict를 반환.
+    - 아직 State 엔진이 노출되지 않았으므로, 임시로 state="S0" 가정.
+    - dd_10y 데이터가 없으므로, 당장은 3Y DD를 그대로 사용.
+      (향후 10Y price series가 들어오면 해당 부분만 교체)
+    """
+    vix = sig["vix"]
+    hy_oas = sig["hy_oas"]
+    dd_3y = sig["drawdown"]          # engine convention: -0.25 = -25%
+    dd_10y = sig.get("dd_10y", dd_3y)  # TODO: 10Y series 도입 시 교체
+    ml_risk = sig["ml_risk"]
+    systemic_bucket = sig["systemic_bucket"]
+
+    # 임시 state: S0 가정 (정식 State 엔진 연동 시 이 부분만 교체)
+    state_name = "S0"
+
+    tas_input = CmaTasInput(
+        vix=vix,
+        hy_oas=hy_oas,
+        dd_3y=dd_3y,
+        dd_10y=dd_10y,
+        ml_risk=ml_risk,
+        state=state_name,
+        systemic_bucket=systemic_bucket,
+    )
+
+    tas_output = compute_cma_tas(tas_input)
+
+    return {
+        "deploy_factor": tas_output.deploy_factor,
+        "threshold": tas_output.final_threshold,
+        "meta": tas_output.meta,
+    }
+
+
 def main():
     market = load_latest_market()
     sig = build_signals(market)
     weights = compute_portfolio_target(sig)
+
+    # CMA TAS 계산
+    cma = compute_cma_section(sig)
 
     print("[INFO] ==== FD / ML / Systemic Summary ====")
     print(f"FX: {sig['fx_rate']:.2f}, FXW: {sig['fxw']:.3f}, FX vol(21D): {sig['fx_vol']:.4f}")
@@ -376,6 +419,12 @@ def main():
     for k in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV"]:
         print(f"  {k}: {weights[k]*100:5.2f}%")
 
+    print("[INFO] ==== CMA TAS (Dynamic Threshold) ====")
+    print(
+        f"  Threshold: {cma['threshold']*100:4.1f}%, "
+        f"Deploy Factor: {cma['deploy_factor']*100:4.1f}%"
+    )
+
     # 결과를 JSON 으로 저장 (Level-4 자동화 대비)
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
@@ -383,6 +432,7 @@ def main():
         "date": today,
         "signals": sig,
         "weights": weights,
+        "cma": cma,  # CMA TAS 결과 포함
     }
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
