@@ -504,14 +504,21 @@ def main():
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f"[OK] Target weights JSON saved to: {out_path}")
 
-    # [ADD] 오늘 신호(sig) + 최종 비중(weights) 기준으로 리포트 생성
-    write_daily_report(sig, weights)
+    # 오늘 신호(sig) + 최종 비중(weights) + State + CMA 기준으로 리포트 생성
+    write_daily_report(sig, weights, state_name, cma)
 
-def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, float]) -> None:
+def write_daily_report(
+    market_data: Dict[str, Any],
+    final_weights: Dict[str, float],
+    state_name: str,
+    cma: Dict[str, Any],
+) -> None:
     """
     아주 단순한 Daily Report를 markdown 파일로 저장.
-    - market_data: 오늘 FD에 쓰인 마켓 데이터 dict
+    - market_data: 오늘 FD/ML/Systemic 신호 dict (sig)
     - final_weights: 엔진 최종 타겟 비중 dict (0~1)
+    - state_name: 엔진이 판단한 최종 State (S0_NORMAL 등)
+    - cma: CMA TAS 결과 dict (threshold, deploy_factor 등)
     """
     print("[REPORT] write_daily_report called")  # 디버그용
 
@@ -532,6 +539,17 @@ def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, flo
     hy_oas = market_data.get("hy_oas")
     ust2y = market_data.get("dgs2")
     ust10y = market_data.get("dgs10")
+
+    # FD / ML / Systemic 주요 신호 추출
+    fxw = market_data.get("fxw")
+    fx_vol = market_data.get("fx_vol")
+    drawdown = market_data.get("drawdown")
+    macro_score = market_data.get("macro_score")
+    ml_risk = market_data.get("ml_risk")
+    ml_opp = market_data.get("ml_opp")
+    ml_regime = market_data.get("ml_regime")
+    systemic_level = market_data.get("systemic_level")
+    systemic_bucket = market_data.get("systemic_bucket")
 
     lines = []
 
@@ -564,6 +582,45 @@ def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, flo
         lines.append(f"| {key:7s} | {w*100:10.2f} |")
 
     lines.append(f"| **Total** | **{total*100:10.2f}** |")
+    lines.append("")
+
+    # 3) FD / ML / Systemic Signals
+    lines.append("## 3. FD / ML / Systemic Signals")
+    lines.append("")
+    if fxw is not None:
+        lines.append(f"- FXW (KDE): {fxw:.3f}")
+    if fx_vol is not None:
+        lines.append(f"- FX Vol (21D σ): {fx_vol:.4f}")
+    if drawdown is not None:
+        lines.append(f"- SPX 3Y Drawdown: {drawdown*100:.2f}%")
+    if macro_score is not None:
+        lines.append(f"- MacroScore: {macro_score:.3f}")
+    if ml_risk is not None and ml_opp is not None and ml_regime is not None:
+        lines.append(
+            f"- ML_Risk / ML_Opp / ML_Regime: "
+            f"{ml_risk:.3f} / {ml_opp:.3f} / {ml_regime:.3f}"
+        )
+    if systemic_level is not None and systemic_bucket is not None:
+        lines.append(
+            f"- Systemic Level / Bucket: {systemic_level:.3f} / {systemic_bucket}"
+        )
+    lines.append("")
+
+    # 4) Engine State
+    lines.append("## 4. Engine State")
+    lines.append("")
+    lines.append(f"- Final State: {state_name}")
+    lines.append("")
+
+    # 5) CMA TAS (Dynamic Threshold) Snapshot
+    lines.append("## 5. CMA TAS (Dynamic Threshold) Snapshot")
+    lines.append("")
+    thr = cma.get("threshold")
+    df = cma.get("deploy_factor")
+    if thr is not None:
+        lines.append(f"- Threshold: {thr*100:.1f}%")
+    if df is not None:
+        lines.append(f"- Deploy Factor: {df*100:.1f}%")
     lines.append("")
 
     content = "\n".join(lines)
