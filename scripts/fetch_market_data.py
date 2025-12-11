@@ -47,14 +47,15 @@ def fetch_fred_data(series_id):
 
 def fetch_snp_pmi():
     """
-    S&P Global US Manufacturing PMI를 TradingEconomics 웹페이지에서 스크래핑해서 가져오는 함수.
-    - 소스: https://tradingeconomics.com/country-list/manufacturing-pmi
-    - United States 행의 첫 번째 숫자(최신 값)를 파싱
+    S&P Global US Manufacturing PMI (TradingEconomics 기준)를 가져오는 함수.
+    소스: https://tradingeconomics.com/united-states/manufacturing-pmi
+
+    페이지 안의 "Latest Value" 숫자를 정규식으로 파싱한다.
     :return: 최신 PMI 값 (float) 또는 None
     """
-    url = "https://tradingeconomics.com/country-list/manufacturing-pmi"
+    url = "https://tradingeconomics.com/united-states/manufacturing-pmi"
     headers = {
-        # 간단한 UA를 넣어 403/봇 차단을 피하는 용도
+        # 간단한 User-Agent 로봇 차단 회피용
         "User-Agent": "Mozilla/5.0 (compatible; AURORA-Rev12.1b Bot/1.0)"
     }
 
@@ -63,13 +64,32 @@ def fetch_snp_pmi():
         resp.raise_for_status()
         html = resp.text
 
-        # "United States, 52.2, 52.5" 같은 패턴에서 첫 번째 숫자(52.2)를 추출
-        # 테이블 구조가 변해도 "United States" 바로 뒤의 첫 번째 실수값을 잡는 방식
-        m = re.search(r"United States[^0-9]+([0-9]+\.[0-9]+)", html)
-        if not m:
-            raise ValueError("United States Manufacturing PMI 값을 HTML에서 찾지 못했습니다.")
-        latest_value = float(m.group(1))
-        return latest_value
+        # TradingEconomics는 보통 이런 형태로 latest value를 노출:
+        # id="ctl00_ContentPlaceHolder1_LatestValue">52.2</span>
+        m = re.search(
+            r'id="ctl00_ContentPlaceHolder1_LatestValue">\s*([-+]?\d+(?:\.\d+)?)',
+            html
+        )
+        if m:
+            return float(m.group(1))
+
+        # 혹시 위 패턴이 바뀐 경우를 대비한 fallback:
+        # "Latest Value 52.2" 같은 패턴 잡기
+        m2 = re.search(
+            r"Latest Value[^0-9\-+]*([-+]?\d+(?:\.\d+)?)",
+            html
+        )
+        if m2:
+            return float(m2.group(1))
+
+        # 그래도 못 찾으면 None 리턴 (엔진에서 graceful degrade)
+        print("[WARN] S&P Global PMI: HTML에서 Latest Value 패턴을 찾지 못했습니다.")
+        return None
+
+    except Exception as e:
+        print(f"[ERROR] S&P Global PMI 스크래핑 중 오류 발생: {e}")
+        return None
+
 
     except Exception as e:
         print(f"[ERROR] S&P Global PMI 스크래핑 중 오류 발생: {e}")
