@@ -37,14 +37,18 @@ def load_latest_market() -> Dict[str, Any]:
 
     # --- FX placeholder 추가 ---
     if "fx" not in market:
-        # 일단 최소한의 placeholder라도 넣어서 KeyError 방지
         market["fx"] = {
             "latest": None
         }
-    # ---------------------------
+    # --- SPX placeholder 추가 ---
+    if "spx" not in market:
+        market["spx"] = {}
+    # 필요하면 나중에 여기서 'close', 'ret' 같은 필드도 채워 넣을 수 있음
+    # --------------------------------
 
     print(f"[INFO] Loaded market data JSON: {latest}")
     return market
+
 
 
 
