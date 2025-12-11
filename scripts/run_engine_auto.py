@@ -30,11 +30,22 @@ def load_latest_market() -> Dict[str, Any]:
     files = sorted(DATA_DIR.glob("market_data_*.json"))
     if not files:
         raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
+    
     latest = files[-1]
     with latest.open("r", encoding="utf-8") as f:
         market = json.load(f)
+
+    # --- FX placeholder 추가 ---
+    if "fx" not in market:
+        # 일단 최소한의 placeholder라도 넣어서 KeyError 방지
+        market["fx"] = {
+            "latest": None
+        }
+    # ---------------------------
+
     print(f"[INFO] Loaded market data JSON: {latest}")
     return market
+
 
 
 def compute_fx_vol(fx_hist_21d):
