@@ -19,7 +19,8 @@
     "ml_opp": 0.3207558649670007,
     "ml_regime": 0.40980479578042905,
     "systemic_level": 0.15168795541780966,
-    "systemic_bucket": "C0"
+    "systemic_bucket": "C0",
+    "state": "S0_NORMAL"
   },
   "weights": {
     "SPX": 0.3182690487323026,
@@ -40,7 +41,7 @@
         "dd_3y": -0.007311155756974487,
         "dd_10y": -0.007311155756974487,
         "ml_risk": 0.18488992193457304,
-        "state": "S0",
+        "state": "S0_NORMAL",
         "systemic_bucket": "C0"
       },
       "gates": {
