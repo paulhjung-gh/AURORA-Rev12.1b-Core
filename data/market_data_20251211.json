@@ -1268,10 +1268,9 @@
     "ffr_upper": null
   },
   "macro": {
-    "ism_pmi": null,
-    "pmi_markit": null,
     "cpi_yoy": null,
-    "unemployment": null
+    "unemployment": null,
+    "pmi_markit": null
   },
   "etf": {
     "VOO": 628.0999755859375,
