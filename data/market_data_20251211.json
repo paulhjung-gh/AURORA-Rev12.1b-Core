@@ -1260,17 +1260,17 @@
   },
   "risk": {
     "vix": 17.06999969482422,
-    "hy_oas": null
+    "hy_oas": 2.89
   },
   "rates": {
-    "dgs2": null,
-    "dgs10": null,
-    "ffr_upper": null
+    "dgs2": 3.61,
+    "dgs10": 4.18,
+    "ffr_upper": 4.0
   },
   "macro": {
-    "cpi_yoy": null,
-    "unemployment": null,
-    "pmi_markit": null
+    "cpi_yoy": 3.022699626172387,
+    "unemployment": 4.4,
+    "pmi_markit": 52.2
   },
   "etf": {
     "VOO": 628.0999755859375,
