@@ -178,6 +178,29 @@ def compute_drawdown(spx_block: Dict[str, Any]) -> float:
     return (last - peak) / peak  # 예: -0.25 = -25%
 
 
+def compute_spx_drawdown_10y() -> float:
+    """
+    10Y SPX long-horizon drawdown 계산.
+    Japan-proof 용도로 사용. yfinance에서 직접 10년치 ^GSPC 종가를 가져온다.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        # yfinance 가 없는 환경이면 보수적으로 0.0 사용
+        return 0.0
+
+    data = yf.download("^GSPC", period="10y", progress=False)
+    if "Close" not in data or data["Close"].empty:
+        return 0.0
+
+    prices = data["Close"]
+    peak = float(prices.max())
+    last = float(prices.iloc[-1])
+    if peak <= 0:
+        return 0.0
+    return (last - peak) / peak  # 예: -0.45 = 지난 10년 고점 대비 -45%
+
+
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
     """
     RuleSet 기반 MacroScore 구현.
@@ -223,6 +246,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     unemployment = macro["unemployment"]
 
     drawdown = compute_drawdown(spx_block)
+    dd_10y = compute_spx_drawdown_10y()
 
     # FXW 계산 (KDE 엔진 사용)
     engine = AuroraX121()
@@ -266,6 +290,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
         "vix": vix,
         "hy_oas": hy_oas,
         "drawdown": drawdown,
+        "dd_10y": dd_10y,
         "dgs2": dgs2,
         "dgs10": dgs10,
         "yc_spread_bps": yc_spread_bps,
@@ -401,7 +426,7 @@ def compute_cma_section(sig: Dict[str, float]) -> Dict[str, Any]:
     vix = sig["vix"]
     hy_oas = sig["hy_oas"]
     dd_3y = sig["drawdown"]             # engine convention: -0.25 = -25%
-    dd_10y = sig.get("dd_10y", dd_3y)   # TODO: 10Y series 도입 시 교체
+    dd_10y = sig.get("dd_10y", dd_3y)   # dd_10y가 없으면 보수적으로 3Y 사용
     ml_risk = sig["ml_risk"]
     systemic_bucket = sig["systemic_bucket"]
 
