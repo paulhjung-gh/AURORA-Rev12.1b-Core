@@ -1,3 +1,5 @@
+# scripts/fetch_market_data.py
+
 import os
 import re
 import json
@@ -48,7 +50,7 @@ def fetch_fred_data(series_id: str) -> List[float]:
 
 def compute_cpi_yoy(cpi_series: List[float]) -> float:
     """
-    CPIAUCSL 시리즈로부터 YoY 변화를 계산한다.
+    CPIAUCSL 시리즈로부터 YoY 변화를 계산.
     최근 값 / 12개월 전 값 - 1 * 100
     """
     if len(cpi_series) < 13:
@@ -129,4 +131,63 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
         return latest_value, historical
 
     except requests.RequestException as e:
-        raise MarketDat
+        raise MarketDataError(f"PMI 페이지 요청 실패: {e}") from e
+
+
+def fetch_all() -> Dict[str, Any]:
+    """
+    FRED + PMI 모든 시계열을 수집.
+    어떤 시리즈라도 비어 있으면 예외를 던진다.
+    """
+    hy_oas_data = fetch_fred_data("BAMLH0A0HYM2")   # HY OAS (bps)
+    dgs2_data = fetch_fred_data("DGS2")             # 2Y Treasury Yield
+    dgs10_data = fetch_fred_data("DGS10")           # 10Y Treasury Yield
+    ffr_data = fetch_fred_data("DFEDTARU")          # FFR Upper
+    cpi_index_data = fetch_fred_data("CPIAUCSL")    # CPI Index
+    unemployment_data = fetch_fred_data("UNRATE")   # Unemployment Rate
+
+    for name, series in [
+        ("HY_OAS", hy_oas_data),
+        ("DGS2", dgs2_data),
+        ("DGS10", dgs10_data),
+        ("FFR", ffr_data),
+        ("CPI_Index", cpi_index_data),
+        ("Unemployment", unemployment_data),
+    ]:
+        if not series:
+            raise MarketDataError(f"{name} 시계열이 비어 있습니다.")
+
+    cpi_yoy = compute_cpi_yoy(cpi_index_data)
+    pmi_latest, pmi_hist = fetch_sp_global_pmi()
+
+    return {
+        "series": {
+            "HY_OAS": hy_oas_data,
+            "DGS2": dgs2_data,
+            "DGS10": dgs10_data,
+            "FFR": ffr_data,
+            "CPI_Index": cpi_index_data,
+            "Unemployment": unemployment_data,
+            "SP_PMI_History": pmi_hist,
+        },
+        "latest": {
+            "hy_oas_bps": hy_oas_data[-1],
+            "dgs2": dgs2_data[-1],
+            "dgs10": dgs10_data[-1],
+            "ffr_upper": ffr_data[-1],
+            "cpi_yoy": cpi_yoy,
+            "unemployment": unemployment_data[-1],
+            "pmi_markit": pmi_latest,
+        },
+    }
+
+
+def save_to_json(data: Dict[str, Any], filename: str) -> None:
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"[INFO] {filename} 저장 완료")
+
+
+if __name__ == "__main__":
+    md = fetch_all()
+    save_to_json(md, "market_data_fred.json")
