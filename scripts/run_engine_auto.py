@@ -42,7 +42,7 @@ def load_latest_market() -> Dict[str, Any]:
     # 1) 기본적으로 raw 내용을 그대로 옮겨 놓고
     market: Dict[str, Any] = dict(raw)
 
-    # 2) FX 블록 구성
+    # 2)  FX block
     usdkrw_val = (
         raw.get("usdkrw")
         or raw.get("usdkrw_sell")
@@ -50,23 +50,31 @@ def load_latest_market() -> Dict[str, Any]:
     )
     fx_val = float(usdkrw_val) if usdkrw_val is not None else 0.0
 
+    # 21D / 130D 히스토리 키 이름 여러 패턴 지원
+    hist_21d = (
+        raw.get("usdkrw_history_21d")
+        or raw.get("usdkrw_hist_21d")
+        or raw.get("usdkrw_hist_21")
+        or raw.get("fx_hist_21d")
+    )
+    hist_130d = (
+        raw.get("usdkrw_history_130d")
+        or raw.get("usdkrw_hist_130d")
+        or raw.get("usdkrw_hist_130")
+        or raw.get("fx_hist_130d")
+    )
+
     market.setdefault("fx", {})
     fx_block = market["fx"]
     if not isinstance(fx_block, dict):
         fx_block = {}
         market["fx"] = fx_block
 
-    # 엔진이 요구하는 필드들: usdkrw, latest, history
     fx_block.setdefault("usdkrw", fx_val)
     fx_block.setdefault("latest", fx_val)
-    fx_block.setdefault(
-        "usdkrw_history_21d",
-        raw.get("usdkrw_history_21d", []),
-    )
-    fx_block.setdefault(
-        "usdkrw_history_130d",
-        raw.get("usdkrw_history_130d", []),
-    )
+    fx_block.setdefault("usdkrw_history_21d", hist_21d or [])
+    fx_block.setdefault("usdkrw_history_130d", hist_130d or [])
+
 
     # 3) SPX 블록 (노멀라이즈용 / drawdown 계산용)
     market.setdefault("spx", {})
