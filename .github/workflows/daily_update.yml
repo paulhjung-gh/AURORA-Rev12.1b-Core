@@ -44,13 +44,8 @@ jobs:
         run: |
           git config user.name "aurora-bot"
           git config user.email "aurora-bot@example.com"
+          git add -A
+          git commit -m "Daily automated update" || echo "No changes"
+          git push
 
-          # 변경 사항이 있는지 먼저 확인
-          if git diff --quiet; then
-            echo "No changes to commit."
-          else
-            echo "Changes detected. Committing..."
-            git add data/market_data_20*.json data/aurora_target_weights_*.json
-            git commit -m "Daily automated update"
-            git push
           fi
