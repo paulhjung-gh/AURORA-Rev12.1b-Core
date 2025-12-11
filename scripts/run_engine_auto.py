@@ -2,6 +2,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
+from datetime import datetime  # datetime 사용 위해 추가
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
@@ -18,8 +19,6 @@ from engine.systemic_layer import (
     compute_systemic_level,
     determine_systemic_bucket,
 )
-
-
 
 
 DATA_DIR = Path("data")
@@ -44,28 +43,45 @@ def load_latest_market() -> Dict[str, Any]:
     market: Dict[str, Any] = dict(raw)
 
     # 2) FX 블록 구성
-    #    (실제 key 이름은 네가 만든 JSON에 맞게 한 번만 맞춰주면 됨)
-    usdkrw = (
-        raw.get("usdkrw") 
-        or raw.get("usdkrw_sell") 
+    usdkrw_val = (
+        raw.get("usdkrw")
+        or raw.get("usdkrw_sell")
         or raw.get("fx_usdkrw")
     )
+    fx_val = float(usdkrw_val) if usdkrw_val is not None else 0.0
+
     market.setdefault("fx", {})
     fx_block = market["fx"]
     if not isinstance(fx_block, dict):
         fx_block = {}
         market["fx"] = fx_block
-    fx_block.setdefault("latest", usdkrw if usdkrw is not None else 0.0)
 
-    # 3) SPX 블록 (노멀라이즈용)
+    # 엔진이 요구하는 필드들: usdkrw, latest, history
+    fx_block.setdefault("usdkrw", fx_val)
+    fx_block.setdefault("latest", fx_val)
+    fx_block.setdefault(
+        "usdkrw_history_21d",
+        raw.get("usdkrw_history_21d", []),
+    )
+    fx_block.setdefault(
+        "usdkrw_history_130d",
+        raw.get("usdkrw_history_130d", []),
+    )
+
+    # 3) SPX 블록 (노멀라이즈용 / drawdown 계산용)
     market.setdefault("spx", {})
     spx_block = market["spx"]
     if not isinstance(spx_block, dict):
         spx_block = {}
         market["spx"] = spx_block
-    # 이 부분은 네 JSON 구조에 맞게 키만 조정하면 됨
+
     spx_block.setdefault("exposure", raw.get("spx_exposure"))
     spx_block.setdefault("drawdown_3y", raw.get("spx_drawdown_3y"))
+    # 3년 히스토리(옵션)
+    spx_block.setdefault(
+        "history_3y",
+        raw.get("spx_history_3y", raw.get("spx_history", [])),
+    )
 
     # 4) RISK 블록: VIX, HY OAS, YC 스프레드 등
     market.setdefault("risk", {})
@@ -73,12 +89,14 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(risk_block, dict):
         risk_block = {}
         market["risk"] = risk_block
+
     vix = raw.get("vix")
     hy_oas = raw.get("hy_oas")
     yc_spread = (
         raw.get("yc_spread")
         or raw.get("yc_10y_2y_spread")
     )
+
     risk_block.setdefault("vix", float(vix) if vix is not None else 0.0)
     risk_block.setdefault("hy_oas", float(hy_oas) if hy_oas is not None else 0.0)
     risk_block.setdefault("yc_spread", float(yc_spread) if yc_spread is not None else 0.0)
@@ -89,9 +107,11 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(rates_block, dict):
         rates_block = {}
         market["rates"] = rates_block
+
     dgs2 = raw.get("dgs2") or raw.get("ust2y")
     dgs10 = raw.get("dgs10") or raw.get("ust10y")
     ffr_upper = raw.get("ffr_upper") or raw.get("ffr")
+
     rates_block.setdefault("dgs2", float(dgs2) if dgs2 is not None else 0.0)
     rates_block.setdefault("dgs10", float(dgs10) if dgs10 is not None else 0.0)
     rates_block.setdefault("ffr_upper", float(ffr_upper) if ffr_upper is not None else 0.0)
@@ -102,22 +122,20 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(macro_block, dict):
         macro_block = {}
         market["macro"] = macro_block
+
     ism = raw.get("ism_mfg") or raw.get("ism")
-    pmi = raw.get("pmi_sp_global") or raw.get("pmi")
+    pmi = raw.get("pmi_sp_global") or raw.get("pmi") or ism
     cpi_yoy = raw.get("cpi_yoy")
     unemp = raw.get("unemployment") or raw.get("unemployment_rate")
 
     macro_block.setdefault("ism", float(ism) if ism is not None else 50.0)
     macro_block.setdefault("pmi", float(pmi) if pmi is not None else 50.0)
+    macro_block.setdefault("pmi_markit", float(pmi) if pmi is not None else 50.0)
     macro_block.setdefault("cpi_yoy", float(cpi_yoy) if cpi_yoy is not None else 2.0)
     macro_block.setdefault("unemployment", float(unemp) if unemp is not None else 4.0)
 
     print(f"[INFO] Loaded market data JSON: {latest}")
     return market
-
-
-
-
 
 
 def compute_fx_vol(fx_hist_21d):
@@ -223,15 +241,15 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     )
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
-    # Systemic 레이어
-    systemic_bucket = determine_systemic_bucket(systemic_level)(
+    # Systemic 레이어: Rev12.1b 공식 로직
+    systemic_level = compute_systemic_level(
         hy_oas=hy_oas,
         yc_spread=yc_spread_bps,
         macro_score=macro_score,
         ml_regime=ml_regime,
         drawdown=drawdown,
     )
-    systemic_bucket = compute_systemic_bucket(systemic_level)
+    systemic_bucket = determine_systemic_bucket(systemic_level)
 
     return {
         "fx_rate": fx_rate,
@@ -340,8 +358,10 @@ def main():
     print(f"FX: {sig['fx_rate']:.2f}, FXW: {sig['fxw']:.3f}, FX vol(21D): {sig['fx_vol']:.4f}")
     print(f"VIX: {sig['vix']:.2f}, HY OAS(bps): {sig['hy_oas']:.1f}, Drawdown(3Y): {sig['drawdown']:.3f}")
     print(f"YC spread(bps): {sig['yc_spread_bps']:.1f}, FFR Upper: {sig['ffr_upper']:.2f}")
-    print(f"MacroScore: {sig['macro_score']:.3f}, ML_Risk: {sig['ml_risk']:.3f}, "
-          f"ML_Opp: {sig['ml_opp']:.3f}, ML_Regime: {sig['ml_regime']:.3f}")
+    print(
+        f"MacroScore: {sig['macro_score']:.3f}, ML_Risk: {sig['ml_risk']:.3f}, "
+        f"ML_Opp: {sig['ml_opp']:.3f}, ML_Regime: {sig['ml_regime']:.3f}"
+    )
     print(f"Systemic Level: {sig['systemic_level']:.3f}, Bucket: {sig['systemic_bucket']}")
 
     print("[INFO] ==== Target Portfolio Weights (AURORA Rev12.1b) ====")
