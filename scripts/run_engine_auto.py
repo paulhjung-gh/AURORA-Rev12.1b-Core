@@ -35,19 +35,30 @@ def load_latest_market() -> Dict[str, Any]:
     with latest.open("r", encoding="utf-8") as f:
         market = json.load(f)
 
-    # --- FX placeholder 추가 ---
+    # --- FX placeholder ---
     if "fx" not in market:
         market["fx"] = {
             "latest": None
         }
-    # --- SPX placeholder 추가 ---
+
+    # --- SPX placeholder ---
     if "spx" not in market:
         market["spx"] = {}
-    # 필요하면 나중에 여기서 'close', 'ret' 같은 필드도 채워 넣을 수 있음
-    # --------------------------------
+
+    # --- RISK placeholder ---
+    if "risk" not in market:
+        # 일단 최소 구조만 만들어 둔다.
+        # 나중에 VIX, HY OAS, YC spread 등 실제 값으로 채워넣을 예정.
+        market["risk"] = {
+            "vix": 0.0,
+            "hy_oas": 0.0,
+            "yc_spread": 0.0,
+        }
+    # ----------------------
 
     print(f"[INFO] Loaded market data JSON: {latest}")
     return market
+
 
 
 
