@@ -94,17 +94,23 @@ class KDE_AdaptiveFXW:
     def add(self, fx: float):
         self.buffer.append(fx)
 
-    def fxw(self, fx: float) -> float:
-        if len(self.buffer) == 0:
-            anchor = 1480.0
-        else:
-            data = np.array(self.buffer)
-            kde = gaussian_kde(data)
-            x = np.linspace(data.min()-100, data.max()+100, 1000)
-            density = kde(x)
-            anchor = x[np.argmax(density)]          # ← 순수 KDE mode (가중 평균 0%)
-        raw = self.alpha * (fx - anchor)
-        return max(0.0, min(1.0, 1.0 / (1.0 + math.exp(raw))))
+def fxw(self, fx: float) -> float:
+    # 샘플이 2개 미만이면 anchor = 현재 fx 자체 (1480 폐기)
+    if len(self.buffer) < 2:
+        anchor = fx
+    else:
+        data = np.array(self.buffer)
+
+        # KDE anchor 계산
+        kde = gaussian_kde(data)
+        x = np.linspace(data.min() - 100, data.max() + 100, 1000)
+        density = kde(x)
+        anchor = x[np.argmax(density)]
+
+    raw = self.alpha * (fx - anchor)
+    return max(0.0, min(1.0, 1.0 / (1.0 + math.exp(raw))))
+
+
 # ========================= 메인 엔진 클래스 =========================
 class AuroraX121:
     def __init__(self):
