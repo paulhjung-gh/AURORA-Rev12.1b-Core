@@ -2,7 +2,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
-from aurora.strategy.cma_tas import CmaTasInput, compute_cma_tas
+from strategy.cma_tas import CmaTasInput, compute_cma_tas
 from datetime import datetime  # datetime 사용 위해 추가
 
 ROOT = Path(__file__).resolve().parents[1]
