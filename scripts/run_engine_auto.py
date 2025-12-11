@@ -518,11 +518,10 @@ def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, flo
     # 오늘 날짜
     today = datetime.now().date()
 
-    # 리포트 저장 폴더: ROOT/reports/YYYY
-    reports_dir = DATA_DIR / "reports" / today.strftime("%Y")
+    # 리포트 저장 폴더: data/reports (연도 디렉토리 제거)
+    reports_dir = DATA_DIR / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    # 파일 이름: 2025-12-12_simple_report.md 이런 식으로
     fname = f"{today.isoformat()}_simple_report.md"
     out_path = reports_dir / fname
 
