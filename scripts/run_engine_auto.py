@@ -1,16 +1,10 @@
 import sys
 from pathlib import Path
 
-# repo root 를 PYTHONPATH 에 추가
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
-# Aurora 엔진 import (두 가지 케이스 모두 대응)
-try:
-    from engine.aurora_engine import AuroraX121  # aurora_engine.py 가 있는 경우
-except ModuleNotFoundError:
-    from engine import AuroraX121                 # __init__.py 안에 클래스가 있는 경우
-
+from engine.aurora_engine import AuroraX121
 from engine.ml_layer import (
     compute_ml_risk,
     compute_ml_opp,
@@ -22,6 +16,7 @@ from engine.systemic_layer import (
     compute_systemic_level,
     compute_systemic_bucket,
 )
+
 
 
 
