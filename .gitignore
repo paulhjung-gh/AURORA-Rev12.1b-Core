@@ -1,0 +1,13 @@
+# Ignore intermediate FRED market data
+data/market_data_fred.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VSCode
+.vscode/
+
+# Logs
+*.log
