@@ -26,38 +26,95 @@ DATA_DIR = Path("data")
 
 
 def load_latest_market() -> Dict[str, Any]:
-    """data/ 폴더에서 가장 최근 market_data_*.json 파일을 불러온다."""
+    """data/ 폴더에서 가장 최근 market_data_*.json 파일을 불러와
+    엔진이 기대하는 market 구조로 변환한다.
+    """
     files = sorted(DATA_DIR.glob("market_data_*.json"))
     if not files:
         raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
     
     latest = files[-1]
     with latest.open("r", encoding="utf-8") as f:
-        market = json.load(f)
+        raw = json.load(f)
 
-    # --- FX placeholder ---
-    if "fx" not in market:
-        market["fx"] = {
-            "latest": None
-        }
+    if not isinstance(raw, dict):
+        raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
 
-    # --- SPX placeholder ---
-    if "spx" not in market:
-        market["spx"] = {}
+    # 1) 기본적으로 raw 내용을 그대로 옮겨 놓고
+    market: Dict[str, Any] = dict(raw)
 
-    # --- RISK placeholder ---
-    if "risk" not in market:
-        # 일단 최소 구조만 만들어 둔다.
-        # 나중에 VIX, HY OAS, YC spread 등 실제 값으로 채워넣을 예정.
-        market["risk"] = {
-            "vix": 0.0,
-            "hy_oas": 0.0,
-            "yc_spread": 0.0,
-        }
-    # ----------------------
+    # 2) FX 블록 구성
+    #    (실제 key 이름은 네가 만든 JSON에 맞게 한 번만 맞춰주면 됨)
+    usdkrw = (
+        raw.get("usdkrw") 
+        or raw.get("usdkrw_sell") 
+        or raw.get("fx_usdkrw")
+    )
+    market.setdefault("fx", {})
+    fx_block = market["fx"]
+    if not isinstance(fx_block, dict):
+        fx_block = {}
+        market["fx"] = fx_block
+    fx_block.setdefault("latest", usdkrw if usdkrw is not None else 0.0)
 
-    print(f"[INFO] Loaded market data JSON: {latest}")
+    # 3) SPX 블록 (노멀라이즈용)
+    market.setdefault("spx", {})
+    spx_block = market["spx"]
+    if not isinstance(spx_block, dict):
+        spx_block = {}
+        market["spx"] = spx_block
+    # 이 부분은 네 JSON 구조에 맞게 키만 조정하면 됨
+    spx_block.setdefault("exposure", raw.get("spx_exposure"))
+    spx_block.setdefault("drawdown_3y", raw.get("spx_drawdown_3y"))
+
+    # 4) RISK 블록: VIX, HY OAS, YC 스프레드 등
+    market.setdefault("risk", {})
+    risk_block = market["risk"]
+    if not isinstance(risk_block, dict):
+        risk_block = {}
+        market["risk"] = risk_block
+    vix = raw.get("vix")
+    hy_oas = raw.get("hy_oas")
+    yc_spread = (
+        raw.get("yc_spread")
+        or raw.get("yc_10y_2y_spread")
+    )
+    risk_block.setdefault("vix", float(vix) if vix is not None else 0.0)
+    risk_block.setdefault("hy_oas", float(hy_oas) if hy_oas is not None else 0.0)
+    risk_block.setdefault("yc_spread", float(yc_spread) if yc_spread is not None else 0.0)
+
+    # 5) RATES 블록: 2Y, 10Y, FFR Upper
+    market.setdefault("rates", {})
+    rates_block = market["rates"]
+    if not isinstance(rates_block, dict):
+        rates_block = {}
+        market["rates"] = rates_block
+    dgs2 = raw.get("dgs2") or raw.get("ust2y")
+    dgs10 = raw.get("dgs10") or raw.get("ust10y")
+    ffr_upper = raw.get("ffr_upper") or raw.get("ffr")
+    rates_block.setdefault("dgs2", float(dgs2) if dgs2 is not None else 0.0)
+    rates_block.setdefault("dgs10", float(dgs10) if dgs10 is not None else 0.0)
+    rates_block.setdefault("ffr_upper", float(ffr_upper) if ffr_upper is not None else 0.0)
+
+    # 6) MACRO 블록: ISM, PMI, CPI YoY, Unemployment
+    market.setdefault("macro", {})
+    macro_block = market["macro"]
+    if not isinstance(macro_block, dict):
+        macro_block = {}
+        market["macro"] = macro_block
+    ism = raw.get("ism_mfg") or raw.get("ism")
+    pmi = raw.get("pmi_sp_global") or raw.get("pmi")
+    cpi_yoy = raw.get("cpi_yoy")
+    unemp = raw.get("unemployment") or raw.get("unemployment_rate")
+
+    macro_block.setdefault("ism", float(ism) if ism is not None else 50.0)
+    macro_block.setdefault("pmi", float(pmi) if pmi is not None else 50.0)
+    macro_block.setdefault("cpi_yoy", float(cpi_yoy) if cpi_yoy is not None else 2.0)
+    macro_block.setdefault("unemployment", float(unemp) if unemp is not None else 4.0)
+
+    print(f\"[INFO] Loaded market data JSON: {latest}\")
     return market
+
 
 
 
