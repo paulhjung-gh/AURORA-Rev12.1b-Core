@@ -28,7 +28,7 @@ def load_latest_market() -> Dict[str, Any]:
     """data/ 폴더에서 가장 최근 market_data_*.json 파일을 불러와
     엔진이 기대하는 market 구조로 변환한다.
     """
-    files = sorted(DATA_DIR.glob("market_data_*.json"))
+    files = sorted(DATA_DIR.glob("market_data_20*.json"))
     if not files:
         raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
     
