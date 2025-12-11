@@ -504,6 +504,71 @@ def main():
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f"[OK] Target weights JSON saved to: {out_path}")
 
+    # [ADD] 오늘 신호(sig) + 최종 비중(weights) 기준으로 리포트 생성
+    write_daily_report(sig, weights)
+
+def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, float]) -> None:
+    """
+    아주 단순한 Daily Report를 markdown 파일로 저장.
+    - market_data: 오늘 FD에 쓰인 마켓 데이터 dict
+    - final_weights: 엔진 최종 타겟 비중 dict (0~1)
+    """
+    # 오늘 날짜
+    today = datetime.now().date()
+
+    # 리포트 저장 폴더: ROOT/reports/YYYY
+    reports_dir = ROOT / "reports" / today.strftime("%Y")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일 이름: 2025-12-12_simple_report.md 이런 식으로
+    fname = f"{today.isoformat()}_simple_report.md"
+    out_path = reports_dir / fname
+
+    # 1) 마켓 데이터 요약 부분 만들기 (필요한 것만 간단히)
+    # market_data 는 sig 딕셔너리라고 보면 됨
+    usdkrw = market_data.get("fx_rate")
+    vix = market_data.get("vix")
+    hy_oas = market_data.get("hy_oas")
+    ust2y = market_data.get("dgs2")
+    ust10y = market_data.get("dgs10")
+
+    lines = []
+
+    lines.append("# AURORA Rev12.1b Simple Daily Report")
+    lines.append("")
+    lines.append(f"- Report Date: {today.isoformat()}")
+    lines.append("")
+    lines.append("## 1. Market Data (요약)")
+
+    if usdkrw is not None:
+        lines.append(f"- USD/KRW (Sell Rate): {usdkrw:.2f}")
+    if vix is not None:
+        lines.append(f"- VIX: {vix:.2f}")
+    if hy_oas is not None:
+        lines.append(f"- HY OAS: {hy_oas:.2f} bps")
+    if ust2y is not None and ust10y is not None:
+        lines.append(f"- UST 2Y / 10Y: {ust2y:.2f}% / {ust10y:.2f}%")
+    lines.append("")
+
+    # 2) 최종 타겟 비중 테이블
+    lines.append("## 2. Final Target Weights (Portfolio 100%)")
+    lines.append("")
+    lines.append("| Asset   | Weight (%) |")
+    lines.append("|---------|-----------:|")
+
+    total = 0.0
+    for key in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV", "GOLD"]:
+        w = float(final_weights.get(key, 0.0))
+        total += w
+        lines.append(f"| {key:7s} | {w*100:10.2f} |")
+
+    lines.append(f"| **Total** | **{total*100:10.2f}** |")
+    lines.append("")
+
+    content = "\n".join(lines)
+
+    out_path.write_text(content, encoding="utf-8")
+    print(f"[REPORT] Simple daily report written to: {out_path}")
 
 if __name__ == "__main__":
     main()
