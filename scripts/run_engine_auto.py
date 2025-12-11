@@ -1,7 +1,9 @@
-import json
+import sys
 from pathlib import Path
-from datetime import datetime
-from typing import Dict, Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 
 # 실제 레포에서는 아래 import 경로만 프로젝트 구조에 맞게 조정하면 됩니다.
 from engine.aurora_engine import AuroraX121
