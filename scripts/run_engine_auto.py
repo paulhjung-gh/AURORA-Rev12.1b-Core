@@ -76,7 +76,6 @@ def load_latest_market() -> Dict[str, Any]:
     fx_block.setdefault("usdkrw_history_21d", hist_21d or [])
     fx_block.setdefault("usdkrw_history_130d", hist_130d or [])
 
-
     # 3) SPX 블록 (노멀라이즈용 / drawdown 계산용)
     market.setdefault("spx", {})
     spx_block = market["spx"]
@@ -358,6 +357,40 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
+# ==== State 결정 로직 (엔진 기반) ====
+
+
+def determine_state_from_signals(sig: Dict[str, float]) -> str:
+    """
+    Rev12.1b FD/ML/Systemic 신호를 기반으로 한 엔진 State 레이블러.
+
+    설계 원칙:
+      - Systemic Layer 스펙을 우선: C2/C3면 무조건 하드 국면.
+      - 그 외에는 ML_Risk / VIX / 3Y Drawdown 기준으로
+        S0_NORMAL / S1_MILD / S2_HIGH_VOL 로 분류.
+    """
+    systemic_bucket = sig["systemic_bucket"]   # "C0"~"C3"
+    systemic_level = sig["systemic_level"]     # 0~1
+    vix = sig["vix"]
+    ml_risk = sig["ml_risk"]                   # 0~1
+    dd = sig["drawdown"]                       # 예: -0.25 = -25%
+
+    # 1) Systemic C2/C3: Governance 상 '구조적 위기' → S3_HARD
+    if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
+        return "S3_HARD"
+
+    # 2) 높은 리스크/변동성 국면 → S2_HIGH_VOL
+    if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
+        return "S2_HIGH_VOL"
+
+    # 3) 완전 하드까지는 아니지만 스트레스가 있는 구간 → S1_MILD
+    if ml_risk >= 0.60 or vix >= 22.0 or dd <= -0.10:
+        return "S1_MILD"
+
+    # 4) 나머지는 평시 → S0_NORMAL
+    return "S0_NORMAL"
+
+
 # ==== CMA TAS Dynamic Threshold 연동 ====
 
 
@@ -372,7 +405,7 @@ def compute_cma_section(sig: Dict[str, float]) -> Dict[str, Any]:
     ml_risk = sig["ml_risk"]
     systemic_bucket = sig["systemic_bucket"]
 
-    # 새 State 결정 로직 사용
+    # 엔진 기반 State 결정
     state_name = determine_state_from_signals(sig)
 
     tas_input = CmaTasInput(
@@ -398,6 +431,9 @@ def main():
     market = load_latest_market()
     sig = build_signals(market)
     weights = compute_portfolio_target(sig)
+
+    # 엔진 기반 State 계산
+    state_name = determine_state_from_signals(sig)
 
     # CMA TAS 계산
     cma = compute_cma_section(sig)
@@ -425,7 +461,6 @@ def main():
     # 결과를 JSON 으로 저장 (Level-4 자동화 대비)
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
-    state_name = determine_state_from_signals(sig)
 
     out = {
         "date": today,
