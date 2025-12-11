@@ -40,12 +40,18 @@ jobs:
         run: |
           python scripts/run_engine_auto.py
 
-      - name: Commit and Push
-        run: |
-          git config user.name "aurora-bot"
-          git config user.email "aurora-bot@example.com"
-          git add -A
-          git commit -m "Daily automated update" || echo "No changes"
-          git push
+- name: Commit and Push
+  run: |
+    git config user.name "aurora-bot"
+    git config user.email "aurora-bot@example.com"
 
-          fi
+    # 모든 변경사항(stage) 올리기
+    git add -A
+
+    # 변경이 없으면 커밋/푸시 생략
+    if git diff --cached --quiet; then
+      echo "No changes to commit"
+    else
+      git commit -m "Daily automated update"
+      git push
+    fi
