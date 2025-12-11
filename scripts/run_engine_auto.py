@@ -112,7 +112,7 @@ def load_latest_market() -> Dict[str, Any]:
     macro_block.setdefault("cpi_yoy", float(cpi_yoy) if cpi_yoy is not None else 2.0)
     macro_block.setdefault("unemployment", float(unemp) if unemp is not None else 4.0)
 
-    print(f"[INFO] Loaded market data JSON: {latest}\")
+    print(f"[INFO] Loaded market data JSON: {latest}")
     return market
 
 
