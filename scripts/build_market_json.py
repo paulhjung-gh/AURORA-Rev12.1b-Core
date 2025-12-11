@@ -4,7 +4,7 @@ from datetime import datetime
 
 RAW_PATH = Path("data/raw_today.json")
 FX_PATH = Path("data/fx_history.json")
-FRED_PATH = Path("market_data_fred.json")  # FRED+PMI 결과 파일
+FRED_PATH = Path("data/market_data_fred.json")  # FRED+PMI 결과 파일
 
 
 def load_json(path: Path):
