@@ -14,7 +14,7 @@ from engine.ml_layer import (
 )
 from engine.systemic_layer import (
     compute_systemic_level,
-    compute_systemic_bucket,
+    determine_systemic_bucket,
 )
 
 
@@ -139,7 +139,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
     # Systemic 레이어
-    systemic_level = compute_systemic_level(
+    systemic_bucket = determine_systemic_bucket(systemic_level)(
         hy_oas=hy_oas,
         yc_spread=yc_spread_bps,
         macro_score=macro_score,
