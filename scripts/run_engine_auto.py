@@ -24,6 +24,11 @@ from engine.systemic_layer import (
 
 DATA_DIR = Path("data")
 
+# === Governance Protocol Rev12.1b Clamp Values ===
+GOV_MAX_SGOV = 0.80        # SGOV Floor 상한 (Rev12.1b Governance)
+GOV_MAX_SAT  = 0.20        # Satellite 최대 확장 구간 상한
+GOV_MAX_DUR  = 0.30        # Duration 상한 (MacroScore 기반 risk-on 구간)
+
 
 def load_latest_market() -> Dict[str, Any]:
     """data/ 폴더에서 가장 최근 market_data_*.json 파일을 불러와
@@ -339,10 +344,10 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         ml_risk=ml_risk,
     )
 
-    # 안전장치: 음수/1 초과 방지 (필요시 튜닝 가능)
-    sgov_floor = max(0.0, min(0.80, sgov_floor))
-    sat_weight = max(0.0, min(0.20, sat_weight))
-    dur_weight = max(0.0, min(0.30, dur_weight))
+    # Governance Rev12.1b 공식 상한 반영
+    sgov_floor = max(0.0, min(GOV_MAX_SGOV, sgov_floor))
+    sat_weight = max(0.0, min(GOV_MAX_SAT,  sat_weight))
+    dur_weight = max(0.0, min(GOV_MAX_DUR,  dur_weight))
 
     residual = 1.0 - (sgov_floor + sat_weight + dur_weight)
     core_weight = max(0.0, residual)
