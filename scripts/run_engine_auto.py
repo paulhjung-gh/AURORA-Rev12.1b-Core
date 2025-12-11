@@ -411,7 +411,7 @@ def main():
         f"ML_Opp: {sig['ml_opp']:.3f}, ML_Regime: {sig['ml_regime']:.3f}"
     )
     print(f"Systemic Level: {sig['systemic_level']:.3f}, Bucket: {sig['systemic_bucket']}")
-
+    print(f"Engine State: {state_name}")
     print("[INFO] ==== Target Portfolio Weights (AURORA Rev12.1b) ====")
     for k in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV"]:
         print(f"  {k}: {weights[k]*100:5.2f}%")
