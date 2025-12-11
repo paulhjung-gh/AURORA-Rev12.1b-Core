@@ -50,7 +50,7 @@ jobs:
             echo "No changes to commit."
           else
             echo "Changes detected. Committing..."
-            git add data/ market_data_fred.json
+            git add data/market_data_*.json data/aurora_target_weights_*.json
             git commit -m "Daily automated update"
             git push
           fi
