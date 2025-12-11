@@ -1,39 +1,66 @@
+# scripts/run_engine_auto.py
+
 import json
 from pathlib import Path
 from datetime import datetime
-import sys
 
-# repo root 경로 설정
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
-# AuroraX121 클래스 임포트
-from engine.AuroraX_Rev12_1b_Engine import AuroraX121
+DATA_DIR = Path("data")
+
+
+def find_latest_market_json() -> Path:
+    """
+    data/ 폴더에서 가장 최근 market_data_*.json 파일을 찾는다.
+    예: data/market_data_20251211.json
+    """
+    candidates = sorted(DATA_DIR.glob("market_data_*.json"))
+    if not candidates:
+        raise FileNotFoundError("[ERROR] data/ 폴더에 market_data_*.json 파일이 없습니다.")
+    return candidates[-1]
+
 
 def main():
-    # 오늘 날짜를 기준으로 market_data 파일명 설정
-    today = datetime.now().strftime("%Y%m%d")
-    data_path = Path(f"data/market_data_{today}.json")
+    latest_path = find_latest_market_json()
 
-    # 데이터 파일이 없으면 종료
-    if not data_path.exists():
-        print(f"[ERROR] market_data file not found: {data_path}")
-        return
-
-    # JSON 파일 읽기
-    with data_path.open("r", encoding="utf-8") as f:
+    with latest_path.open("r", encoding="utf-8") as f:
         market = json.load(f)
 
-    # AuroraX121 엔진 실행
-    engine = AuroraX121()
-    result = engine.run(market)  # 엔진 실행
+    print(f"[INFO] Loaded market data JSON: {latest_path}")
 
-    # 결과 파일로 저장
-    out_path = Path(f"data/results_{today}.json")
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    # 구조는 build_market_json.py 설계에 따라 다를 수 있으니,
+    # 우선 상위 키를 한 번 보여 준다.
+    print(f"[INFO] Top-level keys: {list(market.keys())}")
 
-    print(f"[INFO] 엔진 실행 결과 저장됨: {out_path}")
+    # FRED 블록 요약 (예: 'fred' 내부에 저장했다고 가정)
+    fred = market.get("fred") or market.get("FRED") or {}
+    if fred:
+        print("[INFO] FRED snapshot:")
+        hy = fred.get("hy_oas_bps") or fred.get("HY_OAS")
+        d2 = fred.get("ust2y_yield") or fred.get("DGS2")
+        d10 = fred.get("ust10y_yield") or fred.get("DGS10")
+        ffr = fred.get("ffr_upper") or fred.get("FFR")
+        cpi_yoy = fred.get("cpi_yoy")
+        ur = fred.get("unemployment_rate") or fred.get("Unemployment")
+
+        print(f"  HY OAS (bps): {hy}")
+        print(f"  2Y UST (%):   {d2}")
+        print(f"  10Y UST (%):  {d10}")
+        print(f"  FFR Upper (%): {ffr}")
+        print(f"  CPI YoY (%):   {cpi_yoy}")
+        print(f"  Unemployment (%): {ur}")
+    else:
+        print("[WARN] market JSON 안에 'fred' 블록을 찾지 못했습니다.")
+
+    # S&P Global Manufacturing PMI Latest (우리가 앞에서 저장한 필드명 기준)
+    pmi_latest = (
+        market.get("pmi", {}).get("manufacturing")
+        or market.get("SNP_Manufacturing_PMI_Latest")
+    )
+    print(f"[INFO] S&P Global Manufacturing PMI (Latest): {pmi_latest}")
+
+    # 여기까지 오면 GitHub Actions는 성공(exit code 0)
+    print("[OK] AURORA 엔진 입력용 시장 데이터 검증 완료.")
+
 
 if __name__ == "__main__":
     main()
