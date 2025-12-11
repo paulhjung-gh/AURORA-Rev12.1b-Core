@@ -513,11 +513,13 @@ def write_daily_report(market_data: Dict[str, Any], final_weights: Dict[str, flo
     - market_data: 오늘 FD에 쓰인 마켓 데이터 dict
     - final_weights: 엔진 최종 타겟 비중 dict (0~1)
     """
+    print("[REPORT] write_daily_report called")  # 디버그용
+
     # 오늘 날짜
     today = datetime.now().date()
 
     # 리포트 저장 폴더: ROOT/reports/YYYY
-    reports_dir = ROOT / "reports" / today.strftime("%Y")
+    reports_dir = DATA_DIR / "reports" / today.strftime("%Y")
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     # 파일 이름: 2025-12-12_simple_report.md 이런 식으로
