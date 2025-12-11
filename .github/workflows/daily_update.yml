@@ -5,8 +5,8 @@ permissions:
 
 on:
   schedule:
-    - cron: "30 9 * * *"  # 매일 오전 9:30 (UTC 기준, KST 기준이면 +9h 고려)
-  workflow_dispatch:      # 수동 실행 가능
+    - cron: "30 9 * * *"
+  workflow_dispatch:
 
 jobs:
   build:
@@ -28,9 +28,9 @@ jobs:
 
       - name: Fetch Market Data (Including FRED API Data)
         env:
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}  # Secrets에서 환경 변수로 가져오기
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
-          python scripts/fetch_market_data.py  # FRED + PMI 수집
+          python scripts/fetch_market_data.py
 
       - name: Build Final Market Data JSON
         run: |
@@ -40,18 +40,18 @@ jobs:
         run: |
           python scripts/run_engine_auto.py
 
-- name: Commit and Push
-  run: |
-    git config user.name "aurora-bot"
-    git config user.email "aurora-bot@example.com"
+      - name: Commit and Push      # ← 반드시 여기! steps 안에!
+        run: |
+          git config user.name "aurora-bot"
+          git config user.email "aurora-bot@example.com"
 
-    # 모든 변경사항(stage) 올리기
-    git add -A
+          # 모든 변경사항(stage)
+          git add -A
 
-    # 변경이 없으면 커밋/푸시 생략
-    if git diff --cached --quiet; then
-      echo "No changes to commit"
-    else
-      git commit -m "Daily automated update"
-      git push
-    fi
+          # 변경 없으면 커밋 생략
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily automated update"
+            git push
+          fi
