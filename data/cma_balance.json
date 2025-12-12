@@ -1,5 +1,6 @@
 {
-  "asof_yyyymm": "2025-12",
+  "asof_yyyymm": "202512",
   "deployed_krw": 0,
-  "cash_krw": 12000
+  "cash_krw": 12000,
+  "ref_base_krw": 0
 }
