@@ -116,6 +116,7 @@ def plan_cma_action(
     asof_yyyymm: str,
     deployed_krw: float,
     cash_krw: float,
+    operator_ref_base_krw: float, 
     ref_base_krw: float,       # ← operator input (fixed baseline)
     # engine signals
     fxw: float,
