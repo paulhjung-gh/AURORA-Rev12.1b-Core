@@ -182,32 +182,28 @@ def plan_cma_action(
     # BUY execution (only if cash available)
     if abs(delta_raw) < deadband:
         exec_delta = 0.0
-elif delta_raw > 0:
-    # planned buy (FXW applied first, single rounding)
-    buy_amt = min(delta_raw, cash_krw, buy_cap)
-    buy_amt_scaled = buy_amt * fx_scale
-    buy_amt_scaled = _round_to_5m(buy_amt_scaled)
 
-    if buy_amt_scaled >= 5_000_000:
-        exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
-    else:
-        exec_delta = 0.0
-    else:
-        # SELL gating: very rare
-        if abs(delta_raw) < deadband:
-            exec_delta = 0.0
+    elif delta_raw > 0:
+        # BUY suggestion (FXW applied first, single rounding)
+        buy_amt = min(delta_raw, cash_krw, buy_cap)
+        buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
+
+        if buy_amt_scaled >= 5_000_000:
+            exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
         else:
-            # condition: S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket
-            if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
-                sell_amt = min(abs(delta_raw), sell_cap)
-                # SELL min ticket 10M
-                sell_amt = round(sell_amt / 10_000_000) * 10_000_000
-                if sell_amt >= 10_000_000:
-                    exec_delta = -sell_amt
-                else:
-                    exec_delta = 0.0
+            exec_delta = 0.0
+    else:
+         # condition: S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket
+        if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
+            sell_amt = min(abs(delta_raw), sell_cap)
+            sell_amt = round(sell_amt / 10_000_000) * 10_000_000  # 10M ticket
+
+            if sell_amt >= 10_000_000:
+                exec_delta = -sell_amt
             else:
                 exec_delta = 0.0
+        else:
+            exec_delta = 0.0
 
 
     return {
