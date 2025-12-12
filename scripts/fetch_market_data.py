@@ -4,6 +4,7 @@ import os
 import re
 import json
 from typing import List, Tuple, Dict, Any
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -63,6 +64,7 @@ def compute_cpi_yoy(cpi_series: List[float]) -> float:
 
     return (latest / year_ago - 1.0) * 100.0
 
+
 def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
     """
     S&P Global US Manufacturing PMI 값을 Trading Economics 페이지에서 스크래핑.
@@ -72,9 +74,7 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
     historical 은 실패해도 워크플로우를 죽이지 않고 빈 리스트 허용.
     """
     url = "https://tradingeconomics.com/united-states/manufacturing-pmi"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AURORA-Rev12.1b Bot/1.0)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; AURORA-Rev12.1b Bot/1.0)"}
 
     try:
         resp = requests.get(url, headers=headers, timeout=20)
@@ -82,10 +82,7 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
         html = resp.text
         soup = BeautifulSoup(html, "html.parser")
 
-        # ------------------------------------------------------------------
         # 1) 최신 값: 본문 문장 전체에서 패턴 검색
-        #    예: "Manufacturing PMI in the United States decreased to 52.20 points in November..."
-        # ------------------------------------------------------------------
         text_all = " ".join(soup.stripped_strings)
 
         m = re.search(
@@ -93,7 +90,6 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
             text_all,
         )
         if not m:
-            # fallback: "United States Manufacturing PMI ... 52.2" 같은 패턴
             m = re.search(
                 r"United States Manufacturing PMI[^0-9\-+]*([-+]?\d+(?:\.\d+)?)",
                 text_all,
@@ -106,9 +102,7 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
 
         latest_value = float(m.group(1))
 
-        # ------------------------------------------------------------------
         # 2) Historical 12개월: 안 되면 경고만 찍고 빈 리스트 허용
-        # ------------------------------------------------------------------
         historical: List[float] = []
         try:
             table = soup.find("table", {"id": "calendar"}) or soup.find(
@@ -183,7 +177,6 @@ def fetch_all() -> Dict[str, Any]:
     }
 
     history = {
-        # 필요시 쓸 수 있는 최소 범위만 저장 (엔진이 직접 쓰진 않지만 참고용)
         "pmi_12m": pmi_hist[-12:],           # 최대 12개
         "cpi_13m": cpi_index_data[-13:],     # YoY 계산용 13개월
         "dgs2_30d": dgs2_data[-30:],         # 최근 1개월 금리
@@ -197,9 +190,18 @@ def fetch_all() -> Dict[str, Any]:
 
 
 def save_to_json(data: Dict[str, Any], filename: str) -> None:
+    # 날짜(YYYYMMDD)만 박아서 업데이트 여부를 검증 (시간 저장은 하지 않음)
+    today = datetime.utcnow().strftime("%Y%m%d")
+    data.setdefault("meta", {})
+    if not isinstance(data["meta"], dict):
+        data["meta"] = {}
+    data["meta"]["generated_yyyymmdd"] = today
+
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
     print(f"[INFO] {filename} 저장 완료")
+    print(f"[INFO] generated_yyyymmdd={today}")
 
 
 if __name__ == "__main__":
