@@ -70,7 +70,32 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
 
+    # ✅ Data freshness (DATE ONLY, ignore time)
+    # market_data_YYYYMMDD.json 내부에 meta.generated_yyyymmdd 가 있으면 오늘 날짜와 일치해야 함
+    today = datetime.now().strftime("%Y%m%d")
+    meta = raw.get("meta", {})
+    if isinstance(meta, dict):
+        generated = meta.get("generated_yyyymmdd") or meta.get("date") or meta.get("generated_date")
+        if generated is not None and str(generated) != today:
+            _fail(f"STALE market data: meta.generated_yyyymmdd={generated}, today={today}, file={latest.name}")
+
+    with latest.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    if not isinstance(raw, dict):
+        raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
+
+    # ✅ Data freshness (DATE ONLY, ignore time)
+    # market_data_YYYYMMDD.json 내부에 meta.generated_yyyymmdd 가 있으면 오늘 날짜와 일치해야 함
+    today = datetime.now().strftime("%Y%m%d")
+    meta = raw.get("meta", {})
+    if isinstance(meta, dict):
+        generated = meta.get("generated_yyyymmdd") or meta.get("date") or meta.get("generated_date")
+        if generated is not None and str(generated) != today:
+            _fail(f"STALE market data: meta.generated_yyyymmdd={generated}, today={today}, file={latest.name}")
+
     market: Dict[str, Any] = dict(raw)
+
 
     # --- FX block ---
     fx = raw.get("fx", {})
