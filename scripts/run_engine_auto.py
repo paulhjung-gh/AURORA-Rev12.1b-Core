@@ -414,7 +414,10 @@ def compute_cma_overlay_section(
     - 출력은 숫자 기반 (threshold, deploy_factor, target_deploy, delta_raw, fx_scale, suggested_exec, allocation)
     """
     bal = load_cma_balance()
-    prev_state = load_cma_state()
+
+    today = datetime.now().strftime("%Y%m%d")
+    cma_state_path = DATA_DIR / f"cma_state_{today}.json"
+    prev_state = load_cma_state(cma_state_path)
 
     # dd_mag is magnitude (positive)
     dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
@@ -438,7 +441,7 @@ def compute_cma_overlay_section(
     )
 
     # persist state
-    save_cma_state(out["_state_obj"])
+    save_cma_state(out["_state_obj"], cma_state_path)
 
     suggested_exec = float(out["execution"]["suggested_exec_krw"])
     alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
