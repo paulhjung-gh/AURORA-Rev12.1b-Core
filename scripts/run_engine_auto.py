@@ -1,6 +1,9 @@
+# scripts/run_engine_auto.py
+
 import os
 import sys
 import json
+import math
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime, timezone
@@ -52,12 +55,36 @@ def _fail(msg: str) -> None:
     raise RuntimeError(msg)
 
 
+# =========================
+# P0-4: Unit Guards (strict fail, no auto-convert)
+# =========================
+def _assert_range(name: str, x: float, lo: float, hi: float) -> float:
+    if not (lo <= x <= hi):
+        _fail(f"UNIT_GUARD_FAIL: {name}={x} (expected range {lo}..{hi})")
+    return x
+
+
+def _clean_float_series(xs: list, name: str) -> list[float]:
+    if not isinstance(xs, list):
+        _fail(f"MarketData invalid type: {name} must be list")
+    out: list[float] = []
+    for v in xs:
+        try:
+            fv = float(v)
+        except Exception:
+            continue
+        if not math.isfinite(fv):
+            continue
+        if fv <= 0:
+            continue
+        out.append(fv)
+    return out
+
+
 def load_latest_market() -> Dict[str, Any]:
     """
     Canonical input: data/market_data_YYYYMMDD.json
     - 절대 외부 다운로드로 보충하지 않음 (Determinism)
-    - key는 build_market_json.py가 만든 스키마를 1순위로 사용
-    - 구버전 key는 최소한으로만 alias 처리
     """
     files = sorted(DATA_DIR.glob("market_data_20*.json"))
     if not files:
@@ -71,7 +98,6 @@ def load_latest_market() -> Dict[str, Any]:
         raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
 
     # ✅ Data freshness (DATE ONLY, ignore time)
-    # market_data_YYYYMMDD.json 내부에 meta.generated_yyyymmdd 가 있으면 오늘 날짜와 일치해야 함
     today = datetime.now().strftime("%Y%m%d")
     meta = raw.get("meta", {})
     if isinstance(meta, dict):
@@ -85,6 +111,7 @@ def load_latest_market() -> Dict[str, Any]:
     fx = raw.get("fx", {})
     if not isinstance(fx, dict):
         fx = {}
+
     usdkrw = fx.get("usdkrw") or raw.get("usdkrw") or raw.get("usdkrw_sell") or raw.get("fx_usdkrw")
     if usdkrw is None:
         _fail("MarketData missing: fx.usdkrw")
@@ -92,16 +119,22 @@ def load_latest_market() -> Dict[str, Any]:
     hist_21d = fx.get("usdkrw_history_21d") or raw.get("usdkrw_history_21d") or raw.get("fx_hist_21d")
     hist_130d = fx.get("usdkrw_history_130d") or raw.get("usdkrw_history_130d") or raw.get("fx_hist_130d")
 
-    if not isinstance(hist_21d, list) or len(hist_21d) < 2:
+    fx_hist_21d = _clean_float_series(hist_21d, "fx.usdkrw_history_21d")
+    fx_hist_130d = _clean_float_series(hist_130d, "fx.usdkrw_history_130d")
+
+    if len(fx_hist_21d) < 2:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_21d (need>=2)")
-    if not isinstance(hist_130d, list) or len(hist_130d) < 130:
-        _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
+    if len(fx_hist_130d) < 130:
+        _fail(f"MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130, got={len(fx_hist_130d)})")
+
+    # P0-2: 반드시 최근 130 trading days만 사용 (tail 130)
+    fx_hist_130d = fx_hist_130d[-130:]
 
     market["fx"] = {
         "usdkrw": float(usdkrw),
         "latest": float(usdkrw),
-        "usdkrw_history_21d": [float(x) for x in hist_21d],
-        "usdkrw_history_130d": [float(x) for x in hist_130d],
+        "usdkrw_history_21d": fx_hist_21d,
+        "usdkrw_history_130d": fx_hist_130d,
         "fx_vol_21d_sigma": fx.get("fx_vol_21d_sigma", raw.get("fx_vol_21d_sigma")),
     }
 
@@ -135,14 +168,16 @@ def load_latest_market() -> Dict[str, Any]:
     if hy_oas is None:
         _fail("MarketData missing: risk.hy_oas (bps)")
 
-        # ✅ Unit guard: FRED BAMLH0A0HYM2 is often in percent (e.g., 2.91 == 2.91%)
-    # Engine/ML expects bps (e.g., 291)
-    if 0.0 < hy_oas < 50.0:
-        hy_oas = hy_oas * 100.0
-        
+    vix_f = float(vix)
+    hy_oas_f = float(hy_oas)
+
+    # P0-4 Unit Guards
+    _assert_range("VIX(level)", vix_f, 5.0, 80.0)
+    _assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
+
     market["risk"] = {
-        "vix": float(vix),
-        "hy_oas": float(hy_oas),
+        "vix": vix_f,
+        "hy_oas": hy_oas_f,
         "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
     }
 
@@ -157,10 +192,19 @@ def load_latest_market() -> Dict[str, Any]:
     if dgs2 is None or dgs10 is None or ffr_upper is None:
         _fail("MarketData missing: rates.(dgs2,dgs10,ffr_upper)")
 
+    dgs2_f = float(dgs2)
+    dgs10_f = float(dgs10)
+    ffr_f = float(ffr_upper)
+
+    # P0-4 Unit Guards: yields and policy rates are % (not bps)
+    _assert_range("UST2Y(%)", dgs2_f, 0.0, 25.0)
+    _assert_range("UST10Y(%)", dgs10_f, 0.0, 25.0)
+    _assert_range("FFR_Upper(%)", ffr_f, 0.0, 25.0)
+
     market["rates"] = {
-        "dgs2": float(dgs2),
-        "dgs10": float(dgs10),
-        "ffr_upper": float(ffr_upper),
+        "dgs2": dgs2_f,
+        "dgs10": dgs10_f,
+        "ffr_upper": ffr_f,
     }
 
     # --- MACRO block ---
@@ -175,10 +219,19 @@ def load_latest_market() -> Dict[str, Any]:
     if pmi is None or cpi_yoy is None or unemp is None:
         _fail("MarketData missing: macro.(pmi_markit,cpi_yoy,unemployment)")
 
+    pmi_f = float(pmi)
+    cpi_f = float(cpi_yoy)
+    unemp_f = float(unemp)
+
+    # P0-4 Unit Guards: macro values are %
+    _assert_range("PMI(points)", pmi_f, 0.0, 100.0)
+    _assert_range("CPI_YoY(%)", cpi_f, -20.0, 50.0)
+    _assert_range("Unemployment(%)", unemp_f, 0.0, 30.0)
+
     market["macro"] = {
-        "pmi_markit": float(pmi),
-        "cpi_yoy": float(cpi_yoy),
-        "unemployment": float(unemp),
+        "pmi_markit": pmi_f,
+        "cpi_yoy": cpi_f,
+        "unemployment": unemp_f,
     }
 
     # --- ETF block (optional) ---
@@ -192,7 +245,6 @@ def load_latest_market() -> Dict[str, Any]:
 
 
 def compute_fx_vol(fx_hist_21d: list) -> float:
-    import math
     if not fx_hist_21d or len(fx_hist_21d) < 2:
         return 0.0
     rets = []
@@ -218,13 +270,15 @@ def compute_drawdown_from_series(closes: list[float]) -> float:
 
 
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
-    ism = pmi  # ISM -> PMI substitute (운영 선택)
+    # NOTE: 현재 운영에서는 ISM 부재 시 PMI를 대체로 사용 중.
+    ism = pmi
     ism_n = norm(ism, 45.0, 60.0)
     pmi_n = norm(pmi, 45.0, 60.0)
-    cpi_n = 1.0 - norm(cpi_yoy, 2.0, 8.0)       # ✅ 2~8 (official)
+    cpi_n = 1.0 - norm(cpi_yoy, 2.0, 8.0)
     unemp_n = 1.0 - norm(unemployment, 3.0, 7.0)
     macro = 0.25 * (ism_n + pmi_n + cpi_n + unemp_n)
     return clip(macro, 0.0, 1.0)
+
 
 def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, float]:
     import numpy as np
@@ -235,7 +289,6 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
     kde = gaussian_kde(data)
     x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
     density = kde(x)
-
     anchor = float(x[np.argmax(density)])
 
     return {
@@ -250,7 +303,7 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
     }
 
 
-def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
+def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     fx_block = market["fx"]
     spx_block = market["spx"]
     risk = market["risk"]
@@ -267,7 +320,10 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     dgs2 = float(rates["dgs2"])
     dgs10 = float(rates["dgs10"])
     ffr_upper = float(rates["ffr_upper"])
+
+    # Yield Curve is computed deterministically from % to bps
     yc_spread_bps = (dgs10 - dgs2) * 100.0
+    _assert_range("YieldCurveSpread(bps)", yc_spread_bps, -300.0, 300.0)
 
     pmi = float(macro["pmi_markit"])
     cpi_yoy = float(macro["cpi_yoy"])
@@ -283,27 +339,37 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
         dd_10y = float(drawdown)
 
     # =========================
-    # FXW (KDE 130D) — strict preload, no neutral fallback
+    # FXW (KDE 130 trading days) — strict & validated
     # =========================
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
-    
+
+    # ensure last 130 only (P0-2 core)
+    fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
+    if len(fx_hist_130d) < 130:
+        _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
+
     engine = AuroraX121()
-    
-    # preload: add only (NO compute during preload)
+
     for px in fx_hist_130d:
         engine.kde.add(float(px))
-    
-     # compute exactly once
+
     fxw = engine.kde.fxw(fx_rate)
 
-    # ✅ FXW anchor distribution stats (report/debug only)
+    # KDE stats (debug/report)
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
-    # =========================
-    # MacroScore (주의: 아래 함수도 공식 범위로 수정 권장)
-    # =========================
+    # P0-2 fail-fast: anchor가 분포 극하단으로 튀면 입력 시계열이 잘못 들어온 것으로 간주
+    # (수식 변경 아님. “잘못된 입력을 거부”하는 determinism enforcement)
+    anchor = float(fx_kde["anchor"])
+    p05 = float(fx_kde["p05"])
+    if anchor < (p05 - 10.0):
+        _fail(
+            f"P0-2_GUARD_FAIL: KDE anchor too low vs distribution. "
+            f"anchor={anchor:.1f}, p05={p05:.1f}. "
+            f"Check USDKRW 130D series window/trading-days integrity."
+        )
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
@@ -334,7 +400,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     return {
         "fx_rate": fx_rate,
         "fxw": fxw,
-        "fx_kde": fx_kde, 
+        "fx_kde": fx_kde,
         "fx_vol": fx_vol,
         "vix": vix,
         "hy_oas": hy_oas,
@@ -355,6 +421,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
         "systemic_bucket": systemic_bucket,
     }
 
+
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
     systemic_bucket = sig["systemic_bucket"]
     systemic_level = sig["systemic_level"]
@@ -363,15 +430,12 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
     ml_risk = sig["ml_risk"]
     dd = sig["drawdown"]  # negative
 
-    # 1) Systemic hard clamp
     if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
         return "S3_HARD"
 
-    # 2) High vol trigger (Governance): FXVol ≥ 0.02 → S2_HIGH_VOL
     if fx_vol >= 0.02:
         return "S2_HIGH_VOL"
 
-    # 3) Other high-vol / crash conditions
     if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
         return "S2_HIGH_VOL"
 
@@ -384,7 +448,7 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
 def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     """
     엔진 산출(SGOV/Satellite/Duration/Core)을 'Gold sleeve' 제외 나머지(=95%)에 적용.
-    Gold는 월납입 규칙(ISA10 + Direct10) 기반 고정 5%로 반영.
+    Gold는 월납입 규칙 기반 고정 5%로 반영.
     """
     eng = AuroraX121()
 
@@ -456,7 +520,6 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
 
 def load_cma_balance(path: Path = None) -> Dict[str, Any]:
-    # 운영 기준: data/cma_balance.json (월초에 업데이트 후 커밋)
     if path is None:
         path = DATA_DIR / "cma_balance.json"
     if not path.exists():
@@ -478,6 +541,7 @@ def _find_latest_cma_state_file() -> Path | None:
     files = sorted(DATA_DIR.glob("cma_state_20*.json"))
     return files[-1] if files else None
 
+
 def compute_cma_overlay_section(
     sig: Dict[str, float],
     target_weights: Dict[str, float],
@@ -487,7 +551,6 @@ def compute_cma_overlay_section(
     today = datetime.now().strftime("%Y%m%d")
     cma_state_path = DATA_DIR / f"cma_state_{today}.json"
 
-    # ✅ prev_state: 오늘 파일이 없으면 "가장 최근 파일"에서 이어받기
     if cma_state_path.exists():
         prev_state = load_cma_state(cma_state_path)
     else:
@@ -534,7 +597,6 @@ def compute_cma_overlay_section(
         "allocation": alloc,
         "risk_on_target_weights": risk_on_w,
     }
-
 
 
 def write_daily_report(
@@ -601,7 +663,6 @@ def write_daily_report(
     lines.append("## 3. FD / ML / Systemic Signals")
     lines.append("")
 
-    # === FXW Anchor Distribution (KDE, 130D) ===
     fx_kde = sig.get("fx_kde", {})
     fx_rate = sig.get("fx_rate")
 
@@ -624,8 +685,6 @@ def write_daily_report(
             lines.append(f"- Current FX: {float(fx_rate):.2f} → **{pos}**")
         lines.append("")
 
-
-    lines.append("")
     if fxw is not None:
         lines.append(f"- FXW (KDE): {float(fxw):.3f}")
     if fx_vol is not None:
@@ -677,7 +736,6 @@ def write_daily_report(
     if fx_scale is not None:
         lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
 
-    # ✅ Suggested Exec: 단일 라인(중복 제거) + 안전 처리
     total_cma = float(snap.get("total_cma_krw", 0.0))
     suggested_v = float(suggested) if suggested is not None else 0.0
     pct = (abs(suggested_v) / total_cma * 100.0) if total_cma > 0 else 0.0
