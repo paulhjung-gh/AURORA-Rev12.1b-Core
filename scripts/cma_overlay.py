@@ -123,52 +123,47 @@ def plan_cma_action(
     asof_yyyymm: str,
     deployed_krw: float,
     cash_krw: float,
-    operator_ref_base_krw: float,   # ← single source input (from insert→data)
+    operator_ref_base_krw: float,  # ← only baseline input
     # engine signals
     fxw: float,
     vix: float,
     hy_oas: float,
-    dd_mag_3y: float,          # magnitude, e.g. 0.22
-    long_term_dd_10y: float,   # negative, e.g. -0.17
+    dd_mag_3y: float,
+    long_term_dd_10y: float,
     ml_risk: float,
     systemic_bucket: str,
     final_state_name: str,
-    # for SELL gating
     prev_cma_state: Optional[CMAState],
 ) -> Dict:
     total = deployed_krw + cash_krw
 
     # === ref_base policy ===
-    # Priority:
-    # 1) operator_ref_base_krw > 0 : operator fixed baseline
-    # 2) prev_state.ref_base_krw > 0 : keep existing baseline (post-first-buy fixed)
-    # 3) else 0 : baseline not set -> CMA buy inactive by design
-    op = float(operator_ref_base_krw or 0.0)
-    prev_ref = float(prev_cma_state.ref_base_krw) if (prev_cma_state and prev_cma_state.ref_base_krw) else 0.0
-
-    if op > 0:
-        ref_base = op
-        ref_base_mode = "operator_fixed"
-    elif prev_ref > 0:
-        ref_base = prev_ref
-        ref_base_mode = "state_fixed"
-    else:
+    # operator input is single source of truth
+    ref_base = float(operator_ref_base_krw or 0.0)
+    if ref_base < 0:
         ref_base = 0.0
-        ref_base_mode = "not_set"
 
-    # init/update state (only s0_count + asof tracking; ref_base follows policy above)
-    st = prev_cma_state or CMAState(ref_base_krw=ref_base, s0_count=0, asof_yyyymm=asof_yyyymm)
+    ref_base_mode = "operator_fixed" if ref_base > 0 else "not_set"
 
-    # update s0_count (SELL gate용: S0 연속 개월 수)
+    st = prev_cma_state or CMAState(
+        ref_base_krw=ref_base,
+        s0_count=0,
+        last_s0_yyyymm="",
+        asof_yyyymm=asof_yyyymm,
+    )
+
+    # --- S0 monthly counter logic (월 단위) ---
     if final_state_name.startswith("S0"):
-        st.s0_count += 1
+        if st.last_s0_yyyymm != asof_yyyymm:
+            st.s0_count += 1
+            st.last_s0_yyyymm = asof_yyyymm
     else:
         st.s0_count = 0
+        st.last_s0_yyyymm = ""
 
     st.asof_yyyymm = asof_yyyymm
     st.ref_base_krw = ref_base
 
-    # rolling expansion disabled
     st, ref_base_add = maybe_roll_ref_base(
         total_cma=total,
         dd_mag=dd_mag_3y,
@@ -178,13 +173,11 @@ def plan_cma_action(
         st=st,
     )
 
-    # ---------- BUY (TAS God Mode) ----------
     thr = tas_threshold(vix=vix, long_term_dd_10y=long_term_dd_10y, hy_oas=hy_oas)
     deploy_factor = tas_deploy_factor(dd_mag=dd_mag_3y, thr=thr, ml_risk=ml_risk)
 
-    # NOTE: ref_base=0 => target_deploy=0 => no action (intended)
     target_deploy = ref_base * deploy_factor
-    delta_raw = target_deploy - deployed_krw  # + => BUY, - => SELL target
+    delta_raw = target_deploy - deployed_krw
 
     deadband = 5_000_000
     exec_delta = 0.0
@@ -195,23 +188,17 @@ def plan_cma_action(
 
     if abs(delta_raw) < deadband:
         exec_delta = 0.0
-
     elif delta_raw > 0:
-        # BUY suggestion (FXW applied first, single rounding)
         buy_amt = min(delta_raw, cash_krw, buy_cap)
         buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
-
         if buy_amt_scaled >= 5_000_000:
             exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
         else:
             exec_delta = 0.0
-
     else:
-        # SELL suggestion (rare): S0 2+ months + systemic C0/C1 + 10M ticket
         if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
             sell_amt = min(abs(delta_raw), sell_cap)
-            sell_amt = round(sell_amt / 10_000_000) * 10_000_000  # 10M ticket
-
+            sell_amt = round(sell_amt / 10_000_000) * 10_000_000
             if sell_amt >= 10_000_000:
                 exec_delta = -sell_amt
             else:
@@ -244,7 +231,7 @@ def plan_cma_action(
             "deadband_krw": deadband,
             "suggested_exec_krw": exec_delta,
         },
-        "_state_obj": st,  # caller saves
+        "_state_obj": st,
     }
 
 def allocate_risk_on(exec_buy_krw: float, target_weights: Dict[str, float]) -> Dict[str, float]:
