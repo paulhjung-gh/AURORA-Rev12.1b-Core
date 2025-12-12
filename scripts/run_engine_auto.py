@@ -415,7 +415,14 @@ def load_cma_balance(path: Path = None) -> Dict[str, Any]:
     deployed = float(obj.get("deployed_krw", 0))
     cash = float(obj.get("cash_krw", 0))
     asof = str(obj.get("asof_yyyymm", ""))
-    return {"asof_yyyymm": asof, "deployed_krw": deployed, "cash_krw": cash}
+    ref_base = float(obj.get("ref_base_krw", 0))
+    return {
+        "asof_yyyymm": asof,
+        "deployed_krw": deployed,
+        "cash_krw": cash,
+        "ref_base_krw": ref_base,
+    }
+
 
 
 def compute_cma_overlay_section(
