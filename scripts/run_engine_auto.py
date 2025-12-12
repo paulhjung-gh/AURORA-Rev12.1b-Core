@@ -393,7 +393,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-def load_cma_balance(path: Path = DATA_DIR / "cma_balance.json") -> Dict[str, Any]:
+def load_cma_balance(path: Path = Path("insert") / "cma_balance.json") -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError("data/cma_balance.json 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
     obj = json.loads(path.read_text(encoding="utf-8"))
