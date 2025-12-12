@@ -18,7 +18,6 @@ DATA_DIR = Path("data")
 # if ML_Risk >= 0.75 -> *0.5
 # (DD is positive magnitude here, e.g., 0.22 for -22%)
 # (10Y dd input is negative, e.g., -0.17)
-# Spec: :contentReference[oaicite:3]{index=3}
 
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
@@ -62,10 +61,7 @@ def fx_scale_from_fxw(fxw: float) -> float:
     return 0.7 + 0.6 * _clip(fxw, 0.0, 1.0)
 
 # =========================
-# Rolling Expansion (ref_base 방식)
-# eligible = total - ref_base
-# add = eligible * 0.25
-# 조건: DD>=20%, state=S1_MILD, ML_Risk<0.70, systemic C0/C1
+# CMA State (minimal)
 # =========================
 @dataclass
 class CMAState:
@@ -78,18 +74,22 @@ def load_cma_state(path: Path = DATA_DIR / "cma_state.json") -> Optional[CMAStat
         return None
     obj = json.loads(path.read_text(encoding="utf-8"))
     return CMAState(
-        ref_base_krw=float(obj["ref_base_krw"]),
+        ref_base_krw=float(obj.get("ref_base_krw", 0.0)),
         s0_count=int(obj.get("s0_count", 0)),
         asof_yyyymm=str(obj.get("asof_yyyymm", "")),
     )
 
 def save_cma_state(st: CMAState, path: Path = DATA_DIR / "cma_state.json") -> None:
     path.write_text(json.dumps({
-        "ref_base_krw": round(st.ref_base_krw, 2),
+        "ref_base_krw": round(float(st.ref_base_krw), 2),
         "s0_count": int(st.s0_count),
         "asof_yyyymm": st.asof_yyyymm
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+# =========================
+# Rolling Expansion
+# - Operator-ref_base 고정 정책과 충돌하므로 기본 비활성화
+# =========================
 def maybe_roll_ref_base(
     total_cma: float,
     dd_mag: float,
@@ -98,20 +98,8 @@ def maybe_roll_ref_base(
     systemic_bucket: str,
     st: CMAState,
 ) -> Tuple[CMAState, float]:
-    eligible = max(0.0, total_cma - st.ref_base_krw)
-    add = 0.0
-
-    cond = (
-        dd_mag >= 0.20 and
-        state_name.startswith("S1") and
-        ml_risk < 0.70 and
-        systemic_bucket in ("C0", "C1")
-    )
-    if cond and eligible > 0:
-        add = eligible * 0.25
-        st.ref_base_krw += add
-
-    return st, add
+    # Disabled by design (operator inputs ref_base_krw)
+    return st, 0.0
 
 # =========================
 # Execution constraints
@@ -120,7 +108,6 @@ def maybe_roll_ref_base(
 # Deadband: |delta| < 5M -> No Action
 #
 # SELL: min ticket 10,000,000 KRW, CAP min(0.10*total, 20M)
-# (SELL 조건은 “S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket”)
 # =========================
 def _round_to_5m(x: float) -> float:
     return round(x / 5_000_000) * 5_000_000
@@ -129,12 +116,13 @@ def plan_cma_action(
     asof_yyyymm: str,
     deployed_krw: float,
     cash_krw: float,
+    ref_base_krw: float,       # ← operator input (fixed baseline)
     # engine signals
     fxw: float,
     vix: float,
     hy_oas: float,
     dd_mag_3y: float,          # magnitude, e.g. 0.22
-    long_term_dd_10y: float,   # negative, e.g. -0.17 (없으면 0으로 넣어도 됨)
+    long_term_dd_10y: float,   # negative, e.g. -0.17
     ml_risk: float,
     systemic_bucket: str,
     final_state_name: str,
@@ -143,17 +131,30 @@ def plan_cma_action(
 ) -> Dict:
     total = deployed_krw + cash_krw
 
-    # init cma_state
-    st = prev_cma_state or CMAState(ref_base_krw=total, s0_count=0, asof_yyyymm=asof_yyyymm)
+    # === ref_base policy ===
+    # - operator input is the single source of truth
+    # - if not set (<=0), keep 0 (inactive baseline)
+    ref_base = float(ref_base_krw) if ref_base_krw is not None else 0.0
+    if ref_base < 0:
+        ref_base = 0.0
 
-    # update s0_count (2~3 months consecutive)
+    ref_base_mode = "operator_fixed" if ref_base > 0 else "not_set"
+
+    # init/update state (only s0_count + asof tracking; ref_base is not evolved here)
+    st = prev_cma_state or CMAState(ref_base_krw=ref_base, s0_count=0, asof_yyyymm=asof_yyyymm)
+
+    # update s0_count (2+ months consecutive)
     if final_state_name.startswith("S0"):
         st.s0_count += 1
     else:
         st.s0_count = 0
 
-    # rolling expansion (partial)
     st.asof_yyyymm = asof_yyyymm
+
+    # keep state ref_base aligned to operator input (deterministic)
+    st.ref_base_krw = ref_base
+
+    # rolling expansion disabled (returns 0)
     st, ref_base_add = maybe_roll_ref_base(
         total_cma=total,
         dd_mag=dd_mag_3y,
@@ -163,12 +164,12 @@ def plan_cma_action(
         st=st,
     )
 
-    ref_base = st.ref_base_krw
-
     # ---------- BUY (TAS God Mode) ----------
     thr = tas_threshold(vix=vix, long_term_dd_10y=long_term_dd_10y, hy_oas=hy_oas)
     deploy_factor = tas_deploy_factor(dd_mag=dd_mag_3y, thr=thr, ml_risk=ml_risk)
 
+    # NOTE:
+    # - if ref_base=0, target_deploy=0 -> no action (as intended)
     target_deploy = ref_base * deploy_factor
     delta_raw = target_deploy - deployed_krw  # + => BUY, - => SELL target
 
@@ -179,7 +180,6 @@ def plan_cma_action(
     buy_cap = min(0.15 * total, 20_000_000)
     sell_cap = min(0.10 * total, 20_000_000)
 
-    # BUY execution (only if cash available)
     if abs(delta_raw) < deadband:
         exec_delta = 0.0
 
@@ -192,6 +192,7 @@ def plan_cma_action(
             exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
         else:
             exec_delta = 0.0
+
     else:
         # SELL suggestion (rare): S0 2+ months + systemic C0/C1 + 10M ticket
         if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
@@ -212,6 +213,7 @@ def plan_cma_action(
             "cash_krw": cash_krw,
             "total_cma_krw": total,
             "ref_base_krw": ref_base,
+            "ref_base_mode": ref_base_mode,
             "ref_base_add_krw": ref_base_add,
             "s0_count": st.s0_count
         },
@@ -229,7 +231,6 @@ def plan_cma_action(
             "deadband_krw": deadband,
             "suggested_exec_krw": exec_delta
         },
-
         "_state_obj": st  # caller saves
     }
 
