@@ -446,12 +446,18 @@ def compute_cma_overlay_section(
     suggested_exec = float(out["execution"]["suggested_exec_krw"])
     alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
 
+    # Always compute risk-on basket target weights (normalized)
+    basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
+    denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
+    basket_w = {k: (max(0.0, float(target_weights.get(k, 0.0))) / denom if denom > 0 else 0.0) for k in basket}
+
     return {
         "state": state_name,
         "snapshot": out["cma_snapshot"],
         "tas": out["tas"],
         "execution": out["execution"],
         "allocation": alloc,
+        "risk_on_target_weights": basket_w,
     }
 
 
@@ -577,8 +583,8 @@ def write_daily_report(
     lines.append("")
 
     # Allocation table (risk-on only)
-    lines.append("| CMA Allocation (KRW) | Amount |")
-    lines.append("|----------------------|-------:|")
+    lines.append("| CMA Allocation (KRW, based on Suggested Exec) | Amount |")
+    lines.append("|----------------------------------------------|-------:|")
     for k in ["SPX", "NDX", "DIV", "EM", "ENERGY"]:
         lines.append(f"| {k:20s} | {float(alloc.get(k,0.0)):.0f} |")
     lines.append("")
