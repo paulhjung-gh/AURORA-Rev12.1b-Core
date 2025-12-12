@@ -57,7 +57,7 @@ def main():
     fx_hist = load_json(FX_PATH)
 
     today = datetime.now().strftime("%Y%m%d")
-    out_path = Path(f"data/market_data_{today}.json")
+    out_path = DATA_DIR / f"market_data_{today}.json"
 
     # 기본 뼈대 생성
     market = {
