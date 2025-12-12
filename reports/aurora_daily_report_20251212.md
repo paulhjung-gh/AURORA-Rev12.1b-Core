@@ -2,13 +2,13 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: fb0e349746fd0a88101edd311ad870689777dcf0
-- Run ID: 20169834001
-- Timestamp(UTC): 2025-12-12T14:27:55.130941+00:00
+- Git Commit: e62fc465331ef9baec1f595a83ba1b9d1876fea1
+- Run ID: 20170416630
+- Timestamp(UTC): 2025-12-12T14:49:11.257530+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1476.66
-- VIX: 14.92
+- USD/KRW (Sell Rate): 1475.46
+- VIX: 14.98
 - HY OAS: 291.00 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
@@ -16,13 +16,13 @@
 
 | Asset   | Weight (%) |
 |---------|-----------:|
-| SPX     |      29.13 |
-| NDX     |      13.59 |
-| DIV     |      12.76 |
+| SPX     |      29.14 |
+| NDX     |      13.60 |
+| DIV     |      12.77 |
 | EM      |       6.00 |
 | ENERGY  |       3.00 |
 | DURATION |       0.00 |
-| SGOV    |      30.52 |
+| SGOV    |      30.49 |
 | GOLD    |       5.00 |
 | **Total** | **    100.00** |
 
@@ -30,16 +30,15 @@
 
 ## FXW Anchor Distribution (USD/KRW, 130D KDE)
 
-- KDE Anchor (Mode): **1387.1**
-- Distribution: min=1348.5, P05=1357.4, P25=1383.8, P50=1392.6, P75=1430.2, P95=1469.7, max=1476.7
-- Current FX: 1476.66 → **above anchor (KRW weak)**
+- KDE Anchor (Mode): **1386.9**
+- Distribution: min=1348.5, P05=1357.4, P25=1383.8, P50=1392.6, P75=1430.2, P95=1469.7, max=1475.5
+- Current FX: 1475.46 → **above anchor (KRW weak)**
 
-
-- FXW (KDE): 0.290
+- FXW (KDE): 0.292
 - FX Vol (21D σ): 0.0058
-- SPX 3Y Drawdown: 0.00%
+- SPX 3Y Drawdown: -0.20%
 - MacroScore: 0.610
-- ML_Risk / ML_Opp / ML_Regime: 0.191 / 0.316 / 0.413
+- ML_Risk / ML_Opp / ML_Regime: 0.191 / 0.317 / 0.413
 - Systemic Level / Bucket: 0.188 / C0
 
 ## 4. Engine State
@@ -53,7 +52,7 @@
 - Deploy Factor: 0.0%
 - Target Deploy (KRW): 0
 - Delta Raw (KRW): 0
-- FX Scale (BUY only): 0.874
+- FX Scale (BUY only): 0.875
 - Suggested Exec: HOLD 0 KRW (0.00% of total CMA)
 
 | CMA Allocation (KRW, based on Suggested Exec) | Amount |
