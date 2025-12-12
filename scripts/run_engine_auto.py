@@ -598,6 +598,8 @@ def write_daily_report(
         total_cma = float(snap.get("total_cma_krw", 0.0))
         pct = (abs(float(suggested)) / total_cma * 100.0) if total_cma > 0 else 0.0
         lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f} ({pct:.2f}% of total CMA)")
+        direction = "BUY" if float(suggested) > 0 else ("SELL" if float(suggested) < 0 else "HOLD")
+    lines.append(f"- Suggested Exec: {direction} {float(suggested):.0f} KRW ({pct:.2f}% of total CMA)")
     lines.append("")
 
 
