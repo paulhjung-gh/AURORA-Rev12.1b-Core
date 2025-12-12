@@ -32,6 +32,10 @@ jobs:
         run: |
           python scripts/fetch_market_data.py
 
+      - name: Update FX History (KRW=X)
+        run: |
+          python scripts/update_fx_history.py
+          
       - name: Build Final Market Data JSON
         run: |
           python scripts/build_market_json.py
