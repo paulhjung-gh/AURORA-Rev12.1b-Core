@@ -237,7 +237,6 @@ def plan_cma_action(
             "buy_cap_krw": buy_cap,
             "sell_cap_krw": sell_cap,
             "deadband_krw": deadband,
-            "action": action,
             "exec_delta_krw": exec_delta
         },
         "_state_obj": st  # caller saves
