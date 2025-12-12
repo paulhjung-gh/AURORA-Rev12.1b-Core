@@ -1,6 +1,5 @@
 # scripts/cleanup_artifacts.py
 import re
-import sys
 import json
 from pathlib import Path
 from datetime import datetime, timedelta, date
@@ -11,7 +10,10 @@ DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
 RE_REPORT = re.compile(r"^aurora_daily_report_(\d{8})\.md$")
+
 RE_MARKET = re.compile(r"^market_data_(\d{8})\.json$")
+RE_TARGET_WEIGHTS = re.compile(r"^aurora_target_weights_(\d{8})\.json$")
+RE_CMA_STATE = re.compile(r"^cma_state_(\d{8})\.json$")
 
 
 def _parse_yyyymmdd(s: str) -> date | None:
@@ -30,17 +32,25 @@ def _is_month_start(d: date) -> bool:
     return d.day == 1
 
 
-def cleanup_reports(retain_days: int = 60) -> dict:
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+def _cleanup_by_regex(
+    directory: Path,
+    regex: re.Pattern,
+    retain_days: int,
+    keep_month_boundary: bool = False,
+) -> dict:
+    directory.mkdir(parents=True, exist_ok=True)
     cutoff = date.today() - timedelta(days=retain_days)
 
     deleted = []
     kept = []
     scanned = 0
 
-    for p in sorted(REPORTS_DIR.glob("aurora_daily_report_*.md")):
+    for p in sorted(directory.iterdir()):
+        if not p.is_file():
+            continue
         scanned += 1
-        m = RE_REPORT.match(p.name)
+
+        m = regex.match(p.name)
         if not m:
             kept.append(p.name)
             continue
@@ -50,68 +60,63 @@ def cleanup_reports(retain_days: int = 60) -> dict:
             kept.append(p.name)
             continue
 
-        # keep if within window OR month boundary (start/end)
-        if d >= cutoff or _is_month_start(d) or _is_month_end(d):
-            kept.append(p.name)
-            continue
-
-        p.unlink(missing_ok=True)
-        deleted.append(p.name)
-
-    return {
-        "reports": {
-            "retain_days": retain_days,
-            "cutoff_yyyymmdd": cutoff.strftime("%Y%m%d"),
-            "scanned": scanned,
-            "deleted": deleted,
-            "kept_count": len(kept),
-        }
-    }
-
-
-def cleanup_market_data(retain_days: int = 14) -> dict:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    cutoff = date.today() - timedelta(days=retain_days)
-
-    deleted = []
-    kept = []
-    scanned = 0
-
-    for p in sorted(DATA_DIR.glob("market_data_*.json")):
-        scanned += 1
-        m = RE_MARKET.match(p.name)
-        if not m:
-            kept.append(p.name)
-            continue
-
-        d = _parse_yyyymmdd(m.group(1))
-        if d is None:
-            kept.append(p.name)
-            continue
-
+        # keep if within window OR (optional) month boundary
         if d >= cutoff:
             kept.append(p.name)
             continue
+        if keep_month_boundary and (_is_month_start(d) or _is_month_end(d)):
+            kept.append(p.name)
+            continue
 
         p.unlink(missing_ok=True)
         deleted.append(p.name)
 
     return {
-        "market_data": {
-            "retain_days": retain_days,
-            "cutoff_yyyymmdd": cutoff.strftime("%Y%m%d"),
-            "scanned": scanned,
-            "deleted": deleted,
-            "kept_count": len(kept),
-        }
+        "retain_days": retain_days,
+        "cutoff_yyyymmdd": cutoff.strftime("%Y%m%d"),
+        "scanned": scanned,
+        "deleted": deleted,
+        "kept_count": len(kept),
     }
 
 
 def main() -> int:
-    rep = cleanup_reports(retain_days=60)
-    mkt = cleanup_market_data(retain_days=14)
+    # Reports: 60 days + keep month start/end
+    reports_summary = _cleanup_by_regex(
+        directory=REPORTS_DIR,
+        regex=RE_REPORT,
+        retain_days=60,
+        keep_month_boundary=True,
+    )
 
-    summary = {"date_yyyymmdd": date.today().strftime("%Y%m%d"), **rep, **mkt}
+    # Data artifacts: 14 days only (market/target_weights/cma_state)
+    market_summary = _cleanup_by_regex(
+        directory=DATA_DIR,
+        regex=RE_MARKET,
+        retain_days=14,
+        keep_month_boundary=False,
+    )
+    target_weights_summary = _cleanup_by_regex(
+        directory=DATA_DIR,
+        regex=RE_TARGET_WEIGHTS,
+        retain_days=14,
+        keep_month_boundary=False,
+    )
+    cma_state_summary = _cleanup_by_regex(
+        directory=DATA_DIR,
+        regex=RE_CMA_STATE,
+        retain_days=14,
+        keep_month_boundary=False,
+    )
+
+    summary = {
+        "date_yyyymmdd": date.today().strftime("%Y%m%d"),
+        "reports": reports_summary,
+        "market_data": market_summary,
+        "target_weights": target_weights_summary,
+        "cma_state": cma_state_summary,
+    }
+
     print("[CLEANUP] Summary:")
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
