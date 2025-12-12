@@ -2,9 +2,21 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-RAW_PATH = Path("data/raw_today.json")
-FX_PATH = Path("data/fx_history.json")
-FRED_PATH = Path("data/market_data_fred.json")  # FRED+PMI 결과 파일
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT / "data"
+RAW_PATH = DATA_DIR / "raw_today.json"
+FX_PATH = DATA_DIR / "fx_history.json"
+FRED_PATH = DATA_DIR / "market_data_fred.json"
+
+def main():
+    print(f"[DEBUG] CWD={Path.cwd()}")
+    print(f"[DEBUG] RAW_PATH={RAW_PATH} exists={RAW_PATH.exists()}")
+    if RAW_PATH.exists():
+        st = RAW_PATH.stat()
+        print(f"[DEBUG] raw_today mtime={datetime.fromtimestamp(st.st_mtime)} size={st.st_size}")
+
+    raw = load_json(RAW_PATH)
+    fx_hist = load_json(FX_PATH)
 
 
 def load_json(path: Path):
