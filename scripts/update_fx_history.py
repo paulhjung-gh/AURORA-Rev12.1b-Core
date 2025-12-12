@@ -6,7 +6,9 @@ import pandas as pd
 import yfinance as yf
 
 FX_TICKER = "KRW=X"
-HISTORY_PATH = Path("data/fx_history.json")
+
+ROOT = Path(__file__).resolve().parents[1]
+HISTORY_PATH = ROOT / "data" / "fx_history.json"
 
 
 def main():
@@ -14,6 +16,8 @@ def main():
 
     # 1) KRW=X 1년치 다운로드
     df = yf.download(FX_TICKER, period="1y", progress=False)
+    if df is None or df.empty or "Close" not in df:
+    raise RuntimeError("KRW=X download failed or empty (yfinance)")
     print("Downloaded type :", type(df))
     print("Downloaded cols :", df.columns)
 
@@ -32,7 +36,10 @@ def main():
     # 4) fx_history.json 저장
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with HISTORY_PATH.open("w", encoding="utf-8") as f:
-        json.dump(hist, f, indent=2)
+        json.dump(hist, f, indent=2, ensure_ascii=False)
+
+    st = HISTORY_PATH.stat()
+    print(f"[DEBUG] wrote {HISTORY_PATH} size={st.st_size}")
 
     # 5) 21일 sigma 계산
     sigma = None
