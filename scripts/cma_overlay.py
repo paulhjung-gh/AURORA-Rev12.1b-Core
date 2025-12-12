@@ -161,4 +161,103 @@ def plan_cma_action(
 
     # update s0_count (SELL gate용: S0 연속 개월 수)
     if final_state_name.startswith("S0"):
-        st.s0_count_
+        st.s0_count += 1
+    else:
+        st.s0_count = 0
+
+    st.asof_yyyymm = asof_yyyymm
+    st.ref_base_krw = ref_base
+
+    # rolling expansion disabled
+    st, ref_base_add = maybe_roll_ref_base(
+        total_cma=total,
+        dd_mag=dd_mag_3y,
+        state_name=final_state_name,
+        ml_risk=ml_risk,
+        systemic_bucket=systemic_bucket,
+        st=st,
+    )
+
+    # ---------- BUY (TAS God Mode) ----------
+    thr = tas_threshold(vix=vix, long_term_dd_10y=long_term_dd_10y, hy_oas=hy_oas)
+    deploy_factor = tas_deploy_factor(dd_mag=dd_mag_3y, thr=thr, ml_risk=ml_risk)
+
+    # NOTE: ref_base=0 => target_deploy=0 => no action (intended)
+    target_deploy = ref_base * deploy_factor
+    delta_raw = target_deploy - deployed_krw  # + => BUY, - => SELL target
+
+    deadband = 5_000_000
+    exec_delta = 0.0
+
+    fx_scale = fx_scale_from_fxw(fxw)
+    buy_cap = min(0.15 * total, 20_000_000)
+    sell_cap = min(0.10 * total, 20_000_000)
+
+    if abs(delta_raw) < deadband:
+        exec_delta = 0.0
+
+    elif delta_raw > 0:
+        # BUY suggestion (FXW applied first, single rounding)
+        buy_amt = min(delta_raw, cash_krw, buy_cap)
+        buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
+
+        if buy_amt_scaled >= 5_000_000:
+            exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
+        else:
+            exec_delta = 0.0
+
+    else:
+        # SELL suggestion (rare): S0 2+ months + systemic C0/C1 + 10M ticket
+        if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
+            sell_amt = min(abs(delta_raw), sell_cap)
+            sell_amt = round(sell_amt / 10_000_000) * 10_000_000  # 10M ticket
+
+            if sell_amt >= 10_000_000:
+                exec_delta = -sell_amt
+            else:
+                exec_delta = 0.0
+        else:
+            exec_delta = 0.0
+
+    return {
+        "asof_yyyymm": asof_yyyymm,
+        "cma_snapshot": {
+            "deployed_krw": deployed_krw,
+            "cash_krw": cash_krw,
+            "total_cma_krw": total,
+            "ref_base_krw": ref_base,
+            "ref_base_mode": ref_base_mode,
+            "ref_base_add_krw": ref_base_add,
+            "s0_count": st.s0_count,
+        },
+        "tas": {
+            "threshold": thr,
+            "deploy_factor": deploy_factor,
+            "target_deploy_krw": target_deploy,
+            "delta_raw_krw": delta_raw,
+        },
+        "execution": {
+            "fxw": fxw,
+            "fx_scale": fx_scale,
+            "buy_cap_krw": buy_cap,
+            "sell_cap_krw": sell_cap,
+            "deadband_krw": deadband,
+            "suggested_exec_krw": exec_delta,
+        },
+        "_state_obj": st,  # caller saves
+    }
+
+def allocate_risk_on(exec_buy_krw: float, target_weights: Dict[str, float]) -> Dict[str, float]:
+    """
+    CMA는 Risk-on basket only: SPX/NDX/DIV/EM/ENERGY
+    분배는 '현재비중'이 아니라 '엔진 타겟 weight' 기준.
+    """
+    basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
+    denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
+    if exec_buy_krw <= 0 or denom <= 0:
+        return {k: 0.0 for k in basket}
+    out = {}
+    for k in basket:
+        w = max(0.0, float(target_weights.get(k, 0.0)))
+        out[k] = exec_buy_krw * (w / denom)
+    return out
