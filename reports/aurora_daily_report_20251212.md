@@ -2,13 +2,13 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: 01e58c36920e9ea62cccd6be273e1d86efb1661c
-- Run ID: 20165554615
-- Timestamp(UTC): 2025-12-12T11:37:45.434617+00:00
+- Git Commit: 868cc877533bd36b7120da4b482bd5556d668a2c
+- Run ID: 20166988753
+- Timestamp(UTC): 2025-12-12T12:37:54.714898+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1476.06
-- VIX: 15.13
+- USD/KRW (Sell Rate): 1476.13
+- VIX: 15.18
 - HY OAS: 2.91 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
@@ -41,13 +41,15 @@
 
 ## 5. CMA Overlay (TAS Dynamic Threshold) Snapshot
 
-- CMA Snapshot (KRW): deployed=0, cash=12000, total=12000, ref_base=0, s0_count=8
+- CMA Snapshot (KRW): deployed=0, cash=12000, total=12000, ref_base=0, s0_count=9
 - Threshold: 18.0%
 - Deploy Factor: 0.0%
 - Target Deploy (KRW): 0
 - Delta Raw (KRW): 0
 - FX Scale (BUY only): 0.874
-- Suggested Exec (KRW): 0
+- FX Scale (BUY only): 0.874
+- Suggested Exec (KRW): 0 (0.00% of total CMA)
+- Suggested Exec: HOLD 0 KRW (0.00% of total CMA)
 
 | CMA Allocation (KRW, based on Suggested Exec) | Amount |
 |----------------------------------------------|-------:|
