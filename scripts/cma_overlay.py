@@ -193,7 +193,7 @@ def plan_cma_action(
         else:
             exec_delta = 0.0
     else:
-         # condition: S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket
+        # SELL suggestion (rare): S0 2+ months + systemic C0/C1 + 10M ticket
         if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
             sell_amt = min(abs(delta_raw), sell_cap)
             sell_amt = round(sell_amt / 10_000_000) * 10_000_000  # 10M ticket
@@ -204,7 +204,6 @@ def plan_cma_action(
                 exec_delta = 0.0
         else:
             exec_delta = 0.0
-
 
     return {
         "asof_yyyymm": asof_yyyymm,
