@@ -590,9 +590,16 @@ def write_daily_report(
         lines.append(f"- Delta Raw (KRW): {float(dr):.0f}")
     if fx_scale is not None:
         lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
+    if fx_scale is not None:
+        lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
+
+    # ✅ Suggested Exec: KRW + % of total CMA
     if suggested is not None:
-        lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f}")
+        total_cma = float(snap.get("total_cma_krw", 0.0))
+        pct = (abs(float(suggested)) / total_cma * 100.0) if total_cma > 0 else 0.0
+        lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f} ({pct:.2f}% of total CMA)")
     lines.append("")
+
 
     lines.append("| CMA Allocation (KRW, based on Suggested Exec) | Amount |")
     lines.append("|----------------------------------------------|-------:|")
