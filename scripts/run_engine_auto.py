@@ -2,7 +2,7 @@ import os
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,9 +21,6 @@ from engine.systemic_layer import (
     determine_systemic_bucket,
 )
 
-# CMA Overlay (new)
-# - cma_overlay.py 위치에 따라 import 경로를 맞춰야 함.
-#   권장: scripts/cma_overlay.py 로 두고, scripts 폴더에 __init__.py 추가.
 from scripts.cma_overlay import (
     load_cma_state,
     save_cma_state,
@@ -31,10 +28,10 @@ from scripts.cma_overlay import (
     allocate_risk_on,
 )
 
-DATA_DIR = Path("data")
+DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
-# === Governance Protocol Rev12.1b Clamp Values ===
+# === Governance Protocol Clamp Values (운영 cap) ===
 GOV_MAX_SGOV = 0.80
 GOV_MAX_SAT  = 0.20
 GOV_MAX_DUR  = 0.30
@@ -47,11 +44,21 @@ MONTHLY_GOLD_ISA_KRW = 100_000
 MONTHLY_GOLD_DIRECT_KRW = 100_000
 MONTHLY_GOLD_TOTAL_KRW = MONTHLY_GOLD_ISA_KRW + MONTHLY_GOLD_DIRECT_KRW  # 200,000
 
-# 고정 Gold sleeve 비중 = 200k / 4,000k = 5%
+# Gold sleeve weight = 200k / 4,000k = 5%
 GOLD_SLEEVE_WEIGHT = MONTHLY_GOLD_TOTAL_KRW / MONTHLY_TOTAL_KRW  # 0.05
 
 
+def _fail(msg: str) -> None:
+    raise RuntimeError(msg)
+
+
 def load_latest_market() -> Dict[str, Any]:
+    """
+    Canonical input: data/market_data_YYYYMMDD.json
+    - 절대 외부 다운로드로 보충하지 않음 (Determinism)
+    - key는 build_market_json.py가 만든 스키마를 1순위로 사용
+    - 구버전 key는 최소한으로만 alias 처리
+    """
     files = sorted(DATA_DIR.glob("market_data_20*.json"))
     if not files:
         raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
@@ -65,98 +72,116 @@ def load_latest_market() -> Dict[str, Any]:
 
     market: Dict[str, Any] = dict(raw)
 
-    # FX
-    usdkrw_val = raw.get("usdkrw") or raw.get("usdkrw_sell") or raw.get("fx_usdkrw")
-    fx_val = float(usdkrw_val) if usdkrw_val is not None else 0.0
+    # --- FX block ---
+    fx = raw.get("fx", {})
+    if not isinstance(fx, dict):
+        fx = {}
+    usdkrw = fx.get("usdkrw") or raw.get("usdkrw") or raw.get("usdkrw_sell") or raw.get("fx_usdkrw")
+    if usdkrw is None:
+        _fail("MarketData missing: fx.usdkrw")
 
-    hist_21d = (
-        raw.get("usdkrw_history_21d")
-        or raw.get("usdkrw_hist_21d")
-        or raw.get("usdkrw_hist_21")
-        or raw.get("fx_hist_21d")
-    )
-    hist_130d = (
-        raw.get("usdkrw_history_130d")
-        or raw.get("usdkrw_hist_130d")
-        or raw.get("usdkrw_hist_130")
-        or raw.get("fx_hist_130d")
-    )
+    hist_21d = fx.get("usdkrw_history_21d") or raw.get("usdkrw_history_21d") or raw.get("fx_hist_21d")
+    hist_130d = fx.get("usdkrw_history_130d") or raw.get("usdkrw_history_130d") or raw.get("fx_hist_130d")
 
-    market.setdefault("fx", {})
-    fx_block = market["fx"]
-    if not isinstance(fx_block, dict):
-        fx_block = {}
-        market["fx"] = fx_block
+    if not isinstance(hist_21d, list) or len(hist_21d) < 2:
+        _fail("MarketData missing/insufficient: fx.usdkrw_history_21d (need>=2)")
+    if not isinstance(hist_130d, list) or len(hist_130d) < 130:
+        _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
 
-    fx_block.setdefault("usdkrw", fx_val)
-    fx_block.setdefault("latest", fx_val)
-    fx_block.setdefault("usdkrw_history_21d", hist_21d or [])
-    fx_block.setdefault("usdkrw_history_130d", hist_130d or [])
+    market["fx"] = {
+        "usdkrw": float(usdkrw),
+        "latest": float(usdkrw),
+        "usdkrw_history_21d": [float(x) for x in hist_21d],
+        "usdkrw_history_130d": [float(x) for x in hist_130d],
+        "fx_vol_21d_sigma": fx.get("fx_vol_21d_sigma", raw.get("fx_vol_21d_sigma")),
+    }
 
-    # SPX
-    market.setdefault("spx", {})
-    spx_block = market["spx"]
-    if not isinstance(spx_block, dict):
-        spx_block = {}
-        market["spx"] = spx_block
+    # --- SPX block ---
+    spx = raw.get("spx", {})
+    if not isinstance(spx, dict):
+        spx = {}
 
-    spx_block.setdefault("exposure", raw.get("spx_exposure"))
-    spx_block.setdefault("drawdown_3y", raw.get("spx_drawdown_3y"))
-    spx_block.setdefault("history_3y", raw.get("spx_history_3y", raw.get("spx_history", [])))
+    # build_market_json.py 기준: spx.last / spx.closes_3y_1095
+    spx_last = spx.get("last") or raw.get("spx_last") or raw.get("spx")
+    closes_3y = spx.get("closes_3y_1095") or spx.get("history_3y") or raw.get("spx_3y_closes_1095")
+    if spx_last is None:
+        _fail("MarketData missing: spx.last")
+    if not isinstance(closes_3y, list) or len(closes_3y) < 200:
+        # 1095가 이상적이지만, 최소한으로도 drawdown 계산이 성립해야 함
+        _fail("MarketData missing/insufficient: spx.closes_3y_1095 (need meaningful series)")
 
-    # RISK
-    market.setdefault("risk", {})
-    risk_block = market["risk"]
-    if not isinstance(risk_block, dict):
-        risk_block = {}
-        market["risk"] = risk_block
+    market["spx"] = {
+        "last": float(spx_last),
+        "closes_3y_1095": [float(x) for x in closes_3y],
+        # optional: if build 단계에서 10y closes를 넣으면 여기서 그대로 사용
+        "closes_10y": spx.get("closes_10y") or raw.get("spx_10y_closes"),
+    }
 
-    vix = raw.get("vix")
-    hy_oas = raw.get("hy_oas")
-    yc_spread = raw.get("yc_spread") or raw.get("yc_10y_2y_spread")
+    # --- RISK block ---
+    risk = raw.get("risk", {})
+    if not isinstance(risk, dict):
+        risk = {}
 
-    risk_block.setdefault("vix", float(vix) if vix is not None else 0.0)
-    risk_block.setdefault("hy_oas", float(hy_oas) if hy_oas is not None else 0.0)
-    risk_block.setdefault("yc_spread", float(yc_spread) if yc_spread is not None else 0.0)
+    vix = risk.get("vix") or raw.get("vix")
+    hy_oas = risk.get("hy_oas") or raw.get("hy_oas_bps") or raw.get("hy_oas")
+    if vix is None:
+        _fail("MarketData missing: risk.vix")
+    if hy_oas is None:
+        _fail("MarketData missing: risk.hy_oas (bps)")
 
-    # RATES
-    market.setdefault("rates", {})
-    rates_block = market["rates"]
-    if not isinstance(rates_block, dict):
-        rates_block = {}
-        market["rates"] = rates_block
+    market["risk"] = {
+        "vix": float(vix),
+        "hy_oas": float(hy_oas),
+        "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
+    }
 
-    dgs2 = raw.get("dgs2") or raw.get("ust2y")
-    dgs10 = raw.get("dgs10") or raw.get("ust10y")
-    ffr_upper = raw.get("ffr_upper") or raw.get("ffr")
+    # --- RATES block ---
+    rates = raw.get("rates", {})
+    if not isinstance(rates, dict):
+        rates = {}
 
-    rates_block.setdefault("dgs2", float(dgs2) if dgs2 is not None else 0.0)
-    rates_block.setdefault("dgs10", float(dgs10) if dgs10 is not None else 0.0)
-    rates_block.setdefault("ffr_upper", float(ffr_upper) if ffr_upper is not None else 0.0)
+    dgs2 = rates.get("dgs2") or raw.get("dgs2") or raw.get("ust2y_pct") or raw.get("ust2y")
+    dgs10 = rates.get("dgs10") or raw.get("dgs10") or raw.get("ust10y_pct") or raw.get("ust10y")
+    ffr_upper = rates.get("ffr_upper") or raw.get("ffr_upper_pct") or raw.get("ffr_upper") or raw.get("ffr")
+    if dgs2 is None or dgs10 is None or ffr_upper is None:
+        _fail("MarketData missing: rates.(dgs2,dgs10,ffr_upper)")
 
-    # MACRO
-    market.setdefault("macro", {})
-    macro_block = market["macro"]
-    if not isinstance(macro_block, dict):
-        macro_block = {}
-        market["macro"] = macro_block
+    market["rates"] = {
+        "dgs2": float(dgs2),
+        "dgs10": float(dgs10),
+        "ffr_upper": float(ffr_upper),
+    }
 
-    ism = raw.get("ism_mfg") or raw.get("ism")
-    pmi = raw.get("pmi_sp_global") or raw.get("pmi") or ism
-    cpi_yoy = raw.get("cpi_yoy")
-    unemp = raw.get("unemployment") or raw.get("unemployment_rate")
+    # --- MACRO block ---
+    macro = raw.get("macro", {})
+    if not isinstance(macro, dict):
+        macro = {}
 
-    macro_block.setdefault("ism", float(ism) if ism is not None else 50.0)
-    macro_block.setdefault("pmi", float(pmi) if pmi is not None else 50.0)
-    macro_block.setdefault("pmi_markit", float(pmi) if pmi is not None else 50.0)
-    macro_block.setdefault("cpi_yoy", float(cpi_yoy) if cpi_yoy is not None else 2.0)
-    macro_block.setdefault("unemployment", float(unemp) if unemp is not None else 4.0)
+    # fetch_market_data.py가 latest에 무엇을 넣는지에 따라 alias가 필요할 수 있음
+    pmi = macro.get("pmi_markit") or macro.get("pmi") or raw.get("pmi_markit") or raw.get("pmi_sp_global")
+    cpi_yoy = macro.get("cpi_yoy") or raw.get("cpi_yoy_pct") or raw.get("cpi_yoy")
+    unemp = macro.get("unemployment") or raw.get("unemp_rate_pct") or raw.get("unemployment_rate")
+
+    if pmi is None or cpi_yoy is None or unemp is None:
+        _fail("MarketData missing: macro.(pmi_markit,cpi_yoy,unemployment)")
+
+    market["macro"] = {
+        "pmi_markit": float(pmi),
+        "cpi_yoy": float(cpi_yoy),
+        "unemployment": float(unemp),
+    }
+
+    # --- ETF block (optional for report/validation) ---
+    etf = raw.get("etf") or raw.get("etf_close") or {}
+    if not isinstance(etf, dict):
+        etf = {}
+    market["etf"] = etf
 
     print(f"[INFO] Loaded market data JSON: {latest}")
     return market
 
 
-def compute_fx_vol(fx_hist_21d):
+def compute_fx_vol(fx_hist_21d: list) -> float:
     import math
     if not fx_hist_21d or len(fx_hist_21d) < 2:
         return 0.0
@@ -172,33 +197,14 @@ def compute_fx_vol(fx_hist_21d):
     return var ** 0.5
 
 
-def compute_drawdown(spx_block: Dict[str, Any]) -> float:
-    hist = spx_block.get("history_3y") or spx_block.get("history_1095d") or spx_block.get("history")
-    if not hist:
+def compute_drawdown_from_series(closes: list[float]) -> float:
+    if not closes:
         return 0.0
-    peak = max(hist)
-    last = hist[-1]
+    peak = max(closes)
+    last = closes[-1]
     if peak <= 0:
         return 0.0
     return (last - peak) / peak  # negative in drawdown
-
-
-def compute_spx_drawdown_10y() -> float:
-    try:
-        import yfinance as yf
-    except ImportError:
-        return 0.0
-
-    data = yf.download("^GSPC", period="10y", progress=False)
-    if "Close" not in data or data["Close"].empty:
-        return 0.0
-
-    prices = data["Close"]
-    peak = float(prices.max())
-    last = float(prices.iloc[-1])
-    if peak <= 0:
-        return 0.0
-    return (last - peak) / peak  # negative
 
 
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
@@ -218,30 +224,37 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     rates = market["rates"]
     macro = market["macro"]
 
-    fx_rate = fx_block["usdkrw"]
+    fx_rate = float(fx_block["usdkrw"])
     fx_hist_21d = fx_block.get("usdkrw_history_21d", [])
     fx_vol = compute_fx_vol(fx_hist_21d)
 
-    vix = risk["vix"]
-    hy_oas = risk["hy_oas"]
+    vix = float(risk["vix"])
+    hy_oas = float(risk["hy_oas"])
 
-    dgs2 = rates["dgs2"]
-    dgs10 = rates["dgs10"]
-    ffr_upper = rates["ffr_upper"]
+    dgs2 = float(rates["dgs2"])
+    dgs10 = float(rates["dgs10"])
+    ffr_upper = float(rates["ffr_upper"])
     yc_spread_bps = (dgs10 - dgs2) * 100.0
 
-    pmi = macro["pmi_markit"]
-    cpi_yoy = macro["cpi_yoy"]
-    unemployment = macro["unemployment"]
+    pmi = float(macro["pmi_markit"])
+    cpi_yoy = float(macro["cpi_yoy"])
+    unemployment = float(macro["unemployment"])
 
-    drawdown = compute_drawdown(spx_block)
-    dd_10y = compute_spx_drawdown_10y()
+    closes_3y = spx_block.get("closes_3y_1095", [])
+    drawdown = compute_drawdown_from_series(closes_3y)
 
-    # FXW (KDE)
+    closes_10y = spx_block.get("closes_10y")
+    if isinstance(closes_10y, list) and len(closes_10y) >= 200:
+        dd_10y = compute_drawdown_from_series([float(x) for x in closes_10y])
+    else:
+        # 10Y series가 없으면 3Y drawdown을 보수적 proxy로 사용 (다운로드 금지)
+        dd_10y = float(drawdown)
+
+    # FXW (KDE): 130d series must exist
     engine = AuroraX121()
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     for px in fx_hist_130d[:-1]:
-        engine.fxw(px)
+        engine.fxw(float(px))
     fxw = engine.fxw(fx_rate)
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
@@ -328,7 +341,6 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     macro_score = sig["macro_score"]
     systemic_bucket = sig["systemic_bucket"]
 
-    # Gold fixed sleeve
     gold_w = float(GOLD_SLEEVE_WEIGHT)
     remaining = 1.0 - gold_w
 
@@ -393,9 +405,12 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-def load_cma_balance(path: Path = Path("insert") / "cma_balance.json") -> Dict[str, Any]:
+def load_cma_balance(path: Path = None) -> Dict[str, Any]:
+    # 운영 기준: data/cma_balance.json (월초에 업데이트 후 커밋)
+    if path is None:
+        path = DATA_DIR / "cma_balance.json"
     if not path.exists():
-        raise FileNotFoundError("data/cma_balance.json 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
+        raise FileNotFoundError(f"{path} 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
     obj = json.loads(path.read_text(encoding="utf-8"))
     deployed = float(obj.get("deployed_krw", 0))
     cash = float(obj.get("cash_krw", 0))
@@ -407,22 +422,14 @@ def compute_cma_overlay_section(
     sig: Dict[str, float],
     target_weights: Dict[str, float],
 ) -> Dict[str, Any]:
-    """
-    CMA Overlay 계산:
-    - 입력 (a,b)은 data/cma_balance.json
-    - state 저장/갱신은 data/cma_state.json
-    - 출력은 숫자 기반 (threshold, deploy_factor, target_deploy, delta_raw, fx_scale, suggested_exec, allocation)
-    """
     bal = load_cma_balance()
 
     today = datetime.now().strftime("%Y%m%d")
     cma_state_path = DATA_DIR / f"cma_state_{today}.json"
     prev_state = load_cma_state(cma_state_path)
 
-    # dd_mag is magnitude (positive)
     dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
     dd_10y = float(sig.get("dd_10y", 0.0))
-
     state_name = determine_state_from_signals(sig)
 
     out = plan_cma_action(
@@ -440,13 +447,11 @@ def compute_cma_overlay_section(
         prev_cma_state=prev_state,
     )
 
-    # persist state
     save_cma_state(out["_state_obj"], cma_state_path)
 
     suggested_exec = float(out["execution"]["suggested_exec_krw"])
     alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
 
-    # Always compute risk-on basket target weights (normalized)
     basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
     denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
     risk_on_w = {
@@ -471,17 +476,11 @@ def write_daily_report(
     cma_overlay: Dict[str, Any],
     meta: Dict[str, Any],
 ) -> None:
-    """
-    Daily Report markdown:
-    경로 고정: ROOT/reports/aurora_daily_report_YYYYMMDD.md
-    섹션: 1 Market, 2 Weights, 3 Signals, 4 State, 5 CMA Overlay
-    """
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     today = datetime.now().date()
     yyyymmdd = today.strftime("%Y%m%d")
     out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
 
-    # Market summary
     usdkrw = sig.get("fx_rate")
     vix = sig.get("vix")
     hy_oas = sig.get("hy_oas")
@@ -554,15 +553,12 @@ def write_daily_report(
     lines.append(f"- Final State: {state_name}")
     lines.append("")
 
-    # CMA Overlay (daily)
     lines.append("## 5. CMA Overlay (TAS Dynamic Threshold) Snapshot")
     lines.append("")
     tas = cma_overlay.get("tas", {})
     exe = cma_overlay.get("execution", {})
     snap = cma_overlay.get("snapshot", {})
     alloc = cma_overlay.get("allocation", {})
-    risk_on_w = cma_overlay.get("risk_on_target_weights", {})
-
 
     thr = tas.get("threshold")
     df = tas.get("deploy_factor")
@@ -572,7 +568,10 @@ def write_daily_report(
     fx_scale = exe.get("fx_scale")
     suggested = exe.get("suggested_exec_krw")
 
-    lines.append(f"- CMA Snapshot (KRW): deployed={snap.get('deployed_krw',0):.0f}, cash={snap.get('cash_krw',0):.0f}, total={snap.get('total_cma_krw',0):.0f}, ref_base={snap.get('ref_base_krw',0):.0f}, s0_count={snap.get('s0_count',0)}")
+    lines.append(
+        f"- CMA Snapshot (KRW): deployed={snap.get('deployed_krw',0):.0f}, cash={snap.get('cash_krw',0):.0f}, "
+        f"total={snap.get('total_cma_krw',0):.0f}, ref_base={snap.get('ref_base_krw',0):.0f}, s0_count={snap.get('s0_count',0)}"
+    )
     if thr is not None:
         lines.append(f"- Threshold: {float(thr)*100:.1f}%")
     if df is not None:
@@ -587,7 +586,6 @@ def write_daily_report(
         lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f}")
     lines.append("")
 
-    # Allocation table (risk-on only)
     lines.append("| CMA Allocation (KRW, based on Suggested Exec) | Amount |")
     lines.append("|----------------------------------------------|-------:|")
     for k in ["SPX", "NDX", "DIV", "EM", "ENERGY"]:
@@ -604,10 +602,8 @@ def main():
     weights = compute_portfolio_target(sig)
     state_name = determine_state_from_signals(sig)
 
-    # CMA overlay (daily, based on cma_balance.json)
     cma_overlay = compute_cma_overlay_section(sig, weights)
 
-    # Console summary (optional)
     print("[INFO] ==== 3. FD / ML / Systemic Signals ====")
     print(f"FXW (KDE): {sig['fxw']:.3f}")
     print(f"FX Vol (21D σ): {sig['fx_vol']:.4f}")
@@ -622,7 +618,6 @@ def main():
     print(f"Threshold: {cma_overlay['tas']['threshold']*100:.1f}%")
     print(f"Deploy Factor: {cma_overlay['tas']['deploy_factor']*100:.1f}%")
 
-    # Output JSON (with meta)
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
@@ -644,7 +639,6 @@ def main():
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f"[OK] Target weights JSON saved to: {out_path}")
 
-    # Report
     write_daily_report(sig, weights, state_name, cma_overlay, meta)
 
 
