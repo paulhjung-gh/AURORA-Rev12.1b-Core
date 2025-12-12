@@ -156,37 +156,44 @@ def load_latest_market() -> Dict[str, Any]:
         "closes_10y": spx.get("closes_10y") or raw.get("spx_10y_closes"),
     }
 
-    # --- RISK block ---
-    risk = raw.get("risk", {})
-    if not isinstance(risk, dict):
-        risk = {}
+# --- RISK block ---
+risk = raw.get("risk", {})
+if not isinstance(risk, dict):
+    risk = {}
 
-    vix = risk.get("vix") or raw.get("vix")
-    hy_oas = risk.get("hy_oas") or raw.get("hy_oas_bps") or raw.get("hy_oas")
-    if vix is None:
-        _fail("MarketData missing: risk.vix")
-    if hy_oas is None:
-        _fail("MarketData missing: risk.hy_oas (bps)")
+vix = risk.get("vix") or raw.get("vix")
 
-    vix_f = float(vix)
-    hy_oas_f = float(hy_oas)
+hy_oas = (
+    risk.get("hy_oas_bps")
+    or risk.get("hy_oas")
+    or raw.get("hy_oas_bps")
+    or raw.get("hy_oas")
+)
 
-    # P0-4 Unit Guards
-    _assert_range("VIX(level)", vix_f, 5.0, 80.0)
+if vix is None:
+    _fail("MarketData missing: risk.vix")
+if hy_oas is None:
+    _fail("MarketData missing: risk.hy_oas (bps)")
 
-    # HY OAS: deterministic unit normalization
-    # - If 0 < value < 50, treat as percent points from FRED and convert to bps (×100)
-    # - Then enforce bps range.
-    if 0.0 < hy_oas_f < 50.0:
-        hy_oas_f = hy_oas_f * 100.0
+vix_f = float(vix)
+hy_oas_f = float(hy_oas)
 
-    _assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
+# P0-4 Unit Guards
+_assert_range("VIX(level)", vix_f, 5.0, 80.0)
 
-    market["risk"] = {
-        "vix": vix_f,
-        "hy_oas": hy_oas_f,
-        "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
-    }
+# HY OAS: deterministic unit normalization
+# - If 0 < value < 50, treat as percent points and convert to bps (×100)
+if 0.0 < hy_oas_f < 50.0:
+    hy_oas_f *= 100.0
+    print(f"[UNIT] HY_OAS normalized: percent->bps ({hy_oas} -> {hy_oas_f})")
+
+_assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
+
+market["risk"] = {
+    "vix": vix_f,
+    "hy_oas": hy_oas_f,
+    "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
+}
 
     # --- RATES block ---
     rates = raw.get("rates", {})
