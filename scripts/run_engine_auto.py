@@ -290,13 +290,16 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     for px in fx_hist_130d:
         engine.kde.add(float(px))
     
-    # compute exactly once
+     # compute exactly once
     fxw = engine.kde.fxw(fx_rate)
-    
-    
+
+    # ✅ FXW anchor distribution stats (report/debug only)
+    fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
+
     # =========================
     # MacroScore (주의: 아래 함수도 공식 범위로 수정 권장)
     # =========================
+
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
     ml_risk = compute_ml_risk(
@@ -326,6 +329,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     return {
         "fx_rate": fx_rate,
         "fxw": fxw,
+        "fx_kde": fx_kde, 
         "fx_vol": fx_vol,
         "vix": vix,
         "hy_oas": hy_oas,
