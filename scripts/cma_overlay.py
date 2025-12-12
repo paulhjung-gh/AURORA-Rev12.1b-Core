@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -22,6 +23,7 @@ DATA_DIR = Path("data")
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+
 def tas_threshold(vix: float, long_term_dd_10y: float, hy_oas: float) -> float:
     if vix >= 30:
         thr = 0.16
@@ -35,6 +37,7 @@ def tas_threshold(vix: float, long_term_dd_10y: float, hy_oas: float) -> float:
     if hy_oas >= 500:
         thr += 0.02
     return thr
+
 
 def tas_deploy_factor(dd_mag: float, thr: float, ml_risk: float) -> float:
     if dd_mag < thr:
@@ -53,6 +56,7 @@ def tas_deploy_factor(dd_mag: float, thr: float, ml_risk: float) -> float:
 
     return _clip(deploy, 0.0, 1.0)
 
+
 # =========================
 # FXW scaler (BUY only)
 # fx_scale = 0.7 + 0.6*FXW
@@ -60,14 +64,21 @@ def tas_deploy_factor(dd_mag: float, thr: float, ml_risk: float) -> float:
 def fx_scale_from_fxw(fxw: float) -> float:
     return 0.7 + 0.6 * _clip(fxw, 0.0, 1.0)
 
+
 # =========================
-# CMA State (minimal)
+# CMA State (minimal, SELL gating only)
 # =========================
 @dataclass
 class CMAState:
+    # baseline은 operator input이므로, state에는 저장만(정합성/리포트용) 하고 "진화"시키지 않음
     ref_base_krw: float
+    # S0 연속 카운트 (월 단위)
     s0_count: int
+    # 마지막으로 S0 카운트를 증가시킨 asof_yyyymm (월 단위)
+    last_s0_yyyymm: str
+    # 마지막 run의 asof
     asof_yyyymm: str
+
 
 def load_cma_state(path: Path = DATA_DIR / "cma_state.json") -> Optional[CMAState]:
     if not path.exists():
@@ -76,22 +87,21 @@ def load_cma_state(path: Path = DATA_DIR / "cma_state.json") -> Optional[CMAStat
     return CMAState(
         ref_base_krw=float(obj.get("ref_base_krw", 0.0)),
         s0_count=int(obj.get("s0_count", 0)),
+        # backward compatible: older state file may not have this key
+        last_s0_yyyymm=str(obj.get("last_s0_yyyymm", "")),
         asof_yyyymm=str(obj.get("asof_yyyymm", "")),
     )
 
+
 def save_cma_state(st: CMAState, path: Path = DATA_DIR / "cma_state.json") -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "ref_base_krw": round(float(st.ref_base_krw), 2),
-                "s0_count": int(st.s0_count),
-                "asof_yyyymm": st.asof_yyyymm,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "ref_base_krw": round(float(st.ref_base_krw), 2),
+        "s0_count": int(st.s0_count),
+        "last_s0_yyyymm": str(st.last_s0_yyyymm),
+        "asof_yyyymm": str(st.asof_yyyymm),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 # =========================
 # Rolling Expansion
@@ -108,6 +118,7 @@ def maybe_roll_ref_base(
     # Disabled by design (operator inputs ref_base_krw)
     return st, 0.0
 
+
 # =========================
 # Execution constraints
 # BUY: min ticket 5,000,000 KRW, 5M rounding
@@ -119,32 +130,33 @@ def maybe_roll_ref_base(
 def _round_to_5m(x: float) -> float:
     return round(x / 5_000_000) * 5_000_000
 
+
 def plan_cma_action(
     asof_yyyymm: str,
     deployed_krw: float,
     cash_krw: float,
-    operator_ref_base_krw: float,  # ← only baseline input
+    operator_ref_base_krw: float,  # single source of truth
     # engine signals
     fxw: float,
     vix: float,
     hy_oas: float,
-    dd_mag_3y: float,
-    long_term_dd_10y: float,
+    dd_mag_3y: float,          # magnitude, e.g. 0.22
+    long_term_dd_10y: float,   # negative, e.g. -0.17
     ml_risk: float,
     systemic_bucket: str,
     final_state_name: str,
+    # for SELL gating
     prev_cma_state: Optional[CMAState],
 ) -> Dict:
-    total = deployed_krw + cash_krw
+    total = float(deployed_krw) + float(cash_krw)
 
     # === ref_base policy ===
-    # operator input is single source of truth
-    ref_base = float(operator_ref_base_krw or 0.0)
+    ref_base = float(operator_ref_base_krw) if operator_ref_base_krw is not None else 0.0
     if ref_base < 0:
         ref_base = 0.0
-
     ref_base_mode = "operator_fixed" if ref_base > 0 else "not_set"
 
+    # init/update state
     st = prev_cma_state or CMAState(
         ref_base_krw=ref_base,
         s0_count=0,
@@ -152,7 +164,12 @@ def plan_cma_action(
         asof_yyyymm=asof_yyyymm,
     )
 
-    # --- S0 monthly counter logic (월 단위) ---
+    # keep state ref_base aligned to operator input (deterministic)
+    st.ref_base_krw = ref_base
+    st.asof_yyyymm = asof_yyyymm
+
+    # === s0_count: 월 단위로만 증가 ===
+    # - daily run이더라도 같은 asof_yyyymm 안에서는 증가하지 않음
     if final_state_name.startswith("S0"):
         if st.last_s0_yyyymm != asof_yyyymm:
             st.s0_count += 1
@@ -161,9 +178,7 @@ def plan_cma_action(
         st.s0_count = 0
         st.last_s0_yyyymm = ""
 
-    st.asof_yyyymm = asof_yyyymm
-    st.ref_base_krw = ref_base
-
+    # rolling expansion disabled
     st, ref_base_add = maybe_roll_ref_base(
         total_cma=total,
         dd_mag=dd_mag_3y,
@@ -173,11 +188,13 @@ def plan_cma_action(
         st=st,
     )
 
+    # ---------- BUY (TAS God Mode) ----------
     thr = tas_threshold(vix=vix, long_term_dd_10y=long_term_dd_10y, hy_oas=hy_oas)
     deploy_factor = tas_deploy_factor(dd_mag=dd_mag_3y, thr=thr, ml_risk=ml_risk)
 
+    # ref_base=0이면 target_deploy=0 -> no action (의도)
     target_deploy = ref_base * deploy_factor
-    delta_raw = target_deploy - deployed_krw
+    delta_raw = target_deploy - float(deployed_krw)  # + => BUY, - => SELL target
 
     deadband = 5_000_000
     exec_delta = 0.0
@@ -188,17 +205,23 @@ def plan_cma_action(
 
     if abs(delta_raw) < deadband:
         exec_delta = 0.0
+
     elif delta_raw > 0:
-        buy_amt = min(delta_raw, cash_krw, buy_cap)
+        # BUY suggestion (FXW applied first, single rounding)
+        buy_amt = min(delta_raw, float(cash_krw), buy_cap)
         buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
+
         if buy_amt_scaled >= 5_000_000:
-            exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
+            exec_delta = max(0.0, min(buy_amt_scaled, float(cash_krw)))
         else:
             exec_delta = 0.0
+
     else:
+        # SELL suggestion: S0 월 카운트 2+ & systemic C0/C1 & 10M ticket
         if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
             sell_amt = min(abs(delta_raw), sell_cap)
-            sell_amt = round(sell_amt / 10_000_000) * 10_000_000
+            sell_amt = round(sell_amt / 10_000_000) * 10_000_000  # 10M ticket
+
             if sell_amt >= 10_000_000:
                 exec_delta = -sell_amt
             else:
@@ -209,30 +232,32 @@ def plan_cma_action(
     return {
         "asof_yyyymm": asof_yyyymm,
         "cma_snapshot": {
-            "deployed_krw": deployed_krw,
-            "cash_krw": cash_krw,
-            "total_cma_krw": total,
-            "ref_base_krw": ref_base,
+            "deployed_krw": float(deployed_krw),
+            "cash_krw": float(cash_krw),
+            "total_cma_krw": float(total),
+            "ref_base_krw": float(ref_base),
             "ref_base_mode": ref_base_mode,
-            "ref_base_add_krw": ref_base_add,
-            "s0_count": st.s0_count,
+            "ref_base_add_krw": float(ref_base_add),
+            "s0_count": int(st.s0_count),
+            "last_s0_yyyymm": str(st.last_s0_yyyymm),
         },
         "tas": {
-            "threshold": thr,
-            "deploy_factor": deploy_factor,
-            "target_deploy_krw": target_deploy,
-            "delta_raw_krw": delta_raw,
+            "threshold": float(thr),
+            "deploy_factor": float(deploy_factor),
+            "target_deploy_krw": float(target_deploy),
+            "delta_raw_krw": float(delta_raw),
         },
         "execution": {
-            "fxw": fxw,
-            "fx_scale": fx_scale,
-            "buy_cap_krw": buy_cap,
-            "sell_cap_krw": sell_cap,
-            "deadband_krw": deadband,
-            "suggested_exec_krw": exec_delta,
+            "fxw": float(fxw),
+            "fx_scale": float(fx_scale),
+            "buy_cap_krw": float(buy_cap),
+            "sell_cap_krw": float(sell_cap),
+            "deadband_krw": float(deadband),
+            "suggested_exec_krw": float(exec_delta),
         },
         "_state_obj": st,
     }
+
 
 def allocate_risk_on(exec_buy_krw: float, target_weights: Dict[str, float]) -> Dict[str, float]:
     """
@@ -243,8 +268,8 @@ def allocate_risk_on(exec_buy_krw: float, target_weights: Dict[str, float]) -> D
     denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
     if exec_buy_krw <= 0 or denom <= 0:
         return {k: 0.0 for k in basket}
-    out = {}
+    out: Dict[str, float] = {}
     for k in basket:
         w = max(0.0, float(target_weights.get(k, 0.0)))
-        out[k] = exec_buy_krw * (w / denom)
+        out[k] = float(exec_buy_krw) * (w / denom)
     return out
