@@ -213,13 +213,14 @@ def compute_drawdown_from_series(closes: list[float]) -> float:
 
 
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
-    ism = pmi  # ISM -> PMI substitute
+    ism = pmi  # ISM -> PMI substitute (운영 선택)
     ism_n = norm(ism, 45.0, 60.0)
     pmi_n = norm(pmi, 45.0, 60.0)
-    cpi_n = 1.0 - norm(cpi_yoy, 3.0, 8.0)
+    cpi_n = 1.0 - norm(cpi_yoy, 2.0, 8.0)       # ✅ 2~8 (official)
     unemp_n = 1.0 - norm(unemployment, 3.0, 7.0)
     macro = 0.25 * (ism_n + pmi_n + cpi_n + unemp_n)
     return clip(macro, 0.0, 1.0)
+
 
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
@@ -254,12 +255,25 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     else:
         dd_10y = float(drawdown)
 
-    engine = AuroraX121()
+    # =========================
+    # FXW (KDE 130D) — strict preload, no neutral fallback
+    # =========================
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
-    for px in fx_hist_130d[:-1]:
-        engine.fxw(float(px))
-    fxw = engine.fxw(fx_rate)
+    if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
+        _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
 
+    engine = AuroraX121()
+
+    # ✅ preload: add only (NO compute during preload)
+    for px in fx_hist_130d:
+        engine.kde.add(float(px))
+
+    # ✅ compute exactly once
+    fxw = engine.kde.fxw(fx_rate)
+
+    # =========================
+    # MacroScore (주의: 아래 함수도 공식 범위로 수정 권장)
+    # =========================
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
     ml_risk = compute_ml_risk(
@@ -309,17 +323,23 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
         "systemic_bucket": systemic_bucket,
     }
 
-
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
     systemic_bucket = sig["systemic_bucket"]
     systemic_level = sig["systemic_level"]
     vix = sig["vix"]
+    fx_vol = sig.get("fx_vol", 0.0)
     ml_risk = sig["ml_risk"]
     dd = sig["drawdown"]  # negative
 
+    # 1) Systemic hard clamp
     if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
         return "S3_HARD"
 
+    # 2) High vol trigger (Governance): FXVol ≥ 0.02 → S2_HIGH_VOL
+    if fx_vol >= 0.02:
+        return "S2_HIGH_VOL"
+
+    # 3) Other high-vol / crash conditions
     if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
         return "S2_HIGH_VOL"
 
