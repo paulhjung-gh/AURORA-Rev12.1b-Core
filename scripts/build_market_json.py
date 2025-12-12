@@ -1,11 +1,9 @@
 import json
-import time
 from pathlib import Path
 from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,102 +18,11 @@ def load_json(path: Path):
         return json.load(f)
 
 
-# ---------- Yahoo CSV (primary) with retry/backoff ----------
-def fetch_yahoo_history_csv(ticker: str, days: int = 200, retries: int = 4) -> pd.DataFrame:
-    """
-    Yahoo Finance deterministic historical CSV endpoint.
-    BUT: GitHub Actions 환경에서 429가 자주 떠서, retry+backoff + user-agent 사용.
-    """
-    end = int(time.time())
-    start = end - days * 86400
-
-    ticker_enc = requests.utils.quote(ticker, safe="")
-    url = (
-        f"https://query1.finance.yahoo.com/v7/finance/download/{ticker_enc}"
-        f"?period1={start}&period2={end}&interval=1d&events=history&includeAdjustedClose=true"
-    )
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AURORA/1.0; +https://github.com/paulhjung-gh/AURORA-Rev12.1b-Core)"
-    }
-
-    last_err = None
-    for i in range(retries):
-        try:
-            r = requests.get(url, headers=headers, timeout=25)
-            r.raise_for_status()
-            df = pd.read_csv(pd.io.common.StringIO(r.text))
-            return df
-        except Exception as e:
-            last_err = e
-            # exponential backoff: 2,4,8,16 sec
-            sleep_s = 2 ** (i + 1)
-            print(f"[WARN] yahoo_csv failed ({ticker}) attempt={i+1}/{retries} -> sleep {sleep_s}s. reason={repr(e)}")
-            time.sleep(sleep_s)
-
-    raise RuntimeError(f"Yahoo CSV failed after retries for {ticker}. last_err={repr(last_err)}")
-
-
-# ---------- yfinance fallback ----------
-def yf_prev_close(ticker: str, period: str = "6mo") -> float:
-    df = yf.download(ticker, period=period, progress=False)
-    if df is None or df.empty:
-        raise RuntimeError(f"yfinance empty for {ticker}")
-    # Close may be Series or DataFrame
-    close = df["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-    close = pd.Series(close).dropna()
-    if close.empty:
-        raise RuntimeError(f"yfinance Close empty for {ticker}")
-    return float(close.iloc[-1])
-
-
-def yf_close_series(ticker: str, period: str = "6y", n: int = 1095) -> list[float]:
-    df = yf.download(ticker, period=period, progress=False)
-    if df is None or df.empty:
-        raise RuntimeError(f"yfinance empty for {ticker}")
-    close = df["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-    close = pd.Series(close).dropna().astype(float)
-    closes = close.tolist()
-    if len(closes) < n:
-        return closes
-    return closes[-n:]
-
-
-# ---------- Unified getters: try Yahoo CSV then fallback to yfinance ----------
-def prev_close(ticker: str, days: int = 200) -> float:
-    try:
-        df = fetch_yahoo_history_csv(ticker, days=days)
-        df = df.dropna(subset=["Close"])
-        if df.empty:
-            raise RuntimeError("CSV Close empty")
-        return float(df["Close"].iloc[-1])
-    except Exception as e:
-        print(f"[WARN] prev_close yahoo_csv failed -> fallback yfinance ({ticker}). reason={repr(e)}")
-        return yf_prev_close(ticker, period="1y")
-
-
-def close_series(ticker: str, n: int = 1095, days: int = 2200) -> list[float]:
-    """
-    Need 1095 closes (~3y trading days). Yahoo CSV may 429 -> fallback yfinance.
-    """
-    try:
-        df = fetch_yahoo_history_csv(ticker, days=days)
-        df = df.dropna(subset=["Close"])
-        closes = [float(x) for x in df["Close"].tolist()]
-        if len(closes) < n:
-            return closes
-        return closes[-n:]
-    except Exception as e:
-        print(f"[WARN] close_series yahoo_csv failed -> fallback yfinance ({ticker}). reason={repr(e)}")
-        return yf_close_series(ticker, period="6y", n=n)
-
-
-# ---------- FXVol (21D log-return sigma, non-annualized) ----------
 def fx_vol_21d_sigma(fx_hist: list[float]) -> float:
+    """
+    21D sigma of log returns, non-annualized. Clip [0, 0.05].
+    Requires last 22 prices.
+    """
     if len(fx_hist) < 22:
         return 0.0
     arr = np.array(fx_hist[-22:], dtype=float)
@@ -140,17 +47,95 @@ def merge_fred_into_market(market: dict) -> dict:
     fred = load_json(FRED_PATH)
     latest = fred.get("latest", {}) if isinstance(fred, dict) else {}
 
+    # risk
     market["risk"]["hy_oas"] = latest.get("hy_oas_bps")
 
+    # rates
     market["rates"]["dgs2"] = latest.get("dgs2")
     market["rates"]["dgs10"] = latest.get("dgs10")
     market["rates"]["ffr_upper"] = latest.get("ffr_upper")
 
+    # macro
     market["macro"]["cpi_yoy"] = latest.get("cpi_yoy")
     market["macro"]["unemployment"] = latest.get("unemployment")
     market["macro"]["pmi_markit"] = latest.get("pmi_markit")
 
     return market
+
+
+def _normalize_yf_download(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    yfinance download() 결과를 멀티티커 기준으로 표준화:
+    - columns: (Field, Ticker) or (Ticker, Field) 케이스 모두 대응
+    """
+    if df is None or df.empty:
+        raise RuntimeError("yfinance download returned empty dataframe")
+
+    # yfinance는 보통 columns가 MultiIndex
+    if isinstance(df.columns, pd.MultiIndex):
+        # 케이스1: (PriceField, Ticker)
+        if df.columns.names and df.columns.names[0] in ("Price", None):
+            # 강제 변환은 어려우니 아래 접근 로직에서 처리
+            return df
+        return df
+
+    # 단일 티커면 columns가 단일 인덱스일 수 있음
+    return df
+
+
+def yf_last_close_from_bulk(df: pd.DataFrame, ticker: str) -> float:
+    """
+    bulk df에서 ticker의 마지막 Close를 뽑는다.
+    """
+    if isinstance(df.columns, pd.MultiIndex):
+        # 일반적으로 ('Close', 'VOO') 형태가 많음
+        if ("Close", ticker) in df.columns:
+            s = df[("Close", ticker)].dropna()
+            if s.empty:
+                raise RuntimeError(f"Close empty for {ticker}")
+            return float(s.iloc[-1])
+
+        # 혹시 (ticker, 'Close') 형태
+        if (ticker, "Close") in df.columns:
+            s = df[(ticker, "Close")].dropna()
+            if s.empty:
+                raise RuntimeError(f"Close empty for {ticker}")
+            return float(s.iloc[-1])
+
+        # 다른 형태면 마지막 수단으로 컬럼 탐색
+        closes = [c for c in df.columns if (isinstance(c, tuple) and "Close" in c and ticker in c)]
+        if closes:
+            s = df[closes[0]].dropna()
+            if s.empty:
+                raise RuntimeError(f"Close empty for {ticker}")
+            return float(s.iloc[-1])
+
+        raise RuntimeError(f"Cannot locate Close for {ticker} in yfinance bulk frame")
+
+    # 단일 티커 dataframe
+    if "Close" not in df.columns:
+        raise RuntimeError("Close column missing (single ticker)")
+    s = df["Close"].dropna()
+    if s.empty:
+        raise RuntimeError("Close empty (single ticker)")
+    return float(s.iloc[-1])
+
+
+def yf_close_series_single(ticker: str, period: str, n: int) -> list[float]:
+    """
+    3Y drawdown용 close series. (index는 bulk에서 잘 안 나오는 경우 있어 단독 요청)
+    """
+    df = yf.download(ticker, period=period, progress=False)
+    if df is None or df.empty or "Close" not in df:
+        raise RuntimeError(f"yfinance empty for {ticker} series")
+    close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    close = pd.Series(close).dropna().astype(float)
+    closes = close.tolist()
+    if len(closes) < n:
+        return closes
+    return closes[-n:]
 
 
 def main():
@@ -164,25 +149,37 @@ def main():
     if not isinstance(fx_hist, list) or len(fx_hist) < 130:
         raise RuntimeError(f"fx_history.json insufficient. need>=130 got={len(fx_hist) if isinstance(fx_hist, list) else 'non-list'}")
 
+    if not FRED_PATH.exists():
+        raise RuntimeError("market_data_fred.json missing. Fetch Market Data step must succeed before build.")
+
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"market_data_{today}.json"
 
-    # --- Yahoo primary + yfinance fallback (429-safe) ---
-    spx_last = prev_close("^GSPC", days=2200)
-    spx_3y_1095 = close_series("^GSPC", n=1095, days=2600)
+    # ===== yfinance only (Yahoo CSV endpoint 제거) =====
+    # 1) bulk download for ETF + VIX (reduce requests)
+    tickers_bulk = ["^VIX", "VOO", "QQQ", "SCHD", "SGOV", "VWO", "XLE", "GLD"]
+    df_bulk = yf.download(tickers_bulk, period="1y", progress=False, group_by="column")
+    df_bulk = _normalize_yf_download(df_bulk)
 
-    vix_last = prev_close("^VIX", days=400)
+    vix_last = yf_last_close_from_bulk(df_bulk, "^VIX")
 
     etf = {
-        "VOO": prev_close("VOO", days=400),
-        "QQQ": prev_close("QQQ", days=400),
-        "SCHD": prev_close("SCHD", days=400),
-        "SGOV": prev_close("SGOV", days=400),
-        "VWO": prev_close("VWO", days=400),
-        "XLE": prev_close("XLE", days=400),
-        "GLD": prev_close("GLD", days=400),
+        "VOO": yf_last_close_from_bulk(df_bulk, "VOO"),
+        "QQQ": yf_last_close_from_bulk(df_bulk, "QQQ"),
+        "SCHD": yf_last_close_from_bulk(df_bulk, "SCHD"),
+        "SGOV": yf_last_close_from_bulk(df_bulk, "SGOV"),
+        "VWO": yf_last_close_from_bulk(df_bulk, "VWO"),
+        "XLE": yf_last_close_from_bulk(df_bulk, "XLE"),
+        "GLD": yf_last_close_from_bulk(df_bulk, "GLD"),
     }
 
+    # 2) SPX last + 3y series (index는 별도 요청이 안정적)
+    spx_series_1095 = yf_close_series_single("^GSPC", period="6y", n=1095)
+    if len(spx_series_1095) == 0:
+        raise RuntimeError("SPX series empty (^GSPC)")
+    spx_last = float(spx_series_1095[-1])
+
+    # ===== build output (기존 스키마 유지) =====
     market = {
         "date": today,
         "asof_utc": datetime.now(timezone.utc).isoformat(),
@@ -194,7 +191,7 @@ def main():
         },
         "spx": {
             "last": float(spx_last),
-            "closes_3y_1095": spx_3y_1095,
+            "closes_3y_1095": spx_series_1095,
         },
         "risk": {"vix": float(vix_last), "hy_oas": None},
         "rates": {"dgs2": None, "dgs10": None, "ffr_upper": None},
@@ -202,7 +199,18 @@ def main():
         "etf": etf,
     }
 
+    # FRED+PMI merge (필수)
     market = merge_fred_into_market(market)
+
+    # 필수값 검증 (fail-fast)
+    if market["risk"]["vix"] is None:
+        raise RuntimeError("VIX missing")
+    if market["risk"]["hy_oas"] is None:
+        raise RuntimeError("HY OAS missing (from FRED latest)")
+    if market["rates"]["dgs2"] is None or market["rates"]["dgs10"] is None or market["rates"]["ffr_upper"] is None:
+        raise RuntimeError("Rates missing (DGS2/DGS10/FFR)")
+    if market["macro"]["cpi_yoy"] is None or market["macro"]["unemployment"] is None or market["macro"]["pmi_markit"] is None:
+        raise RuntimeError("Macro missing (CPI/UNEMP/PMI)")
 
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(market, f, indent=2, ensure_ascii=False)
