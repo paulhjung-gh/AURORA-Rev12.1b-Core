@@ -2,13 +2,13 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: df1d711d485e2e943f074f41539015e4cfbb33d0
-- Run ID: 20169321801
-- Timestamp(UTC): 2025-12-12T14:09:53.388131+00:00
+- Git Commit: 5f97df4088001d25dcd95edac7e96711692e885f
+- Run ID: 20169574432
+- Timestamp(UTC): 2025-12-12T14:18:54.916510+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1476.22
-- VIX: 14.94
+- USD/KRW (Sell Rate): 1476.63
+- VIX: 14.90
 - HY OAS: 2.91 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
@@ -22,14 +22,20 @@
 | EM      |       6.00 |
 | ENERGY  |       3.00 |
 | DURATION |       0.00 |
-| SGOV    |      30.51 |
+| SGOV    |      30.52 |
 | GOLD    |       5.00 |
 | **Total** | **    100.00** |
 
 ## 3. FD / ML / Systemic Signals
 
+## FXW Anchor Distribution (USD/KRW, 130D KDE)
 
-- FXW (KDE): 0.291
+- KDE Anchor (Mode): **1387.1**
+- Distribution: min=1348.5, P05=1357.4, P25=1383.8, P50=1392.6, P75=1430.2, P95=1469.7, max=1476.6
+- Current FX: 1476.63 → **above anchor (KRW weak)**
+
+
+- FXW (KDE): 0.290
 - FX Vol (21D σ): 0.0058
 - SPX 3Y Drawdown: 0.00%
 - MacroScore: 0.610
