@@ -2,14 +2,14 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: 5f97df4088001d25dcd95edac7e96711692e885f
-- Run ID: 20169574432
-- Timestamp(UTC): 2025-12-12T14:18:54.916510+00:00
+- Git Commit: fb0e349746fd0a88101edd311ad870689777dcf0
+- Run ID: 20169834001
+- Timestamp(UTC): 2025-12-12T14:27:55.130941+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1476.63
-- VIX: 14.90
-- HY OAS: 2.91 bps
+- USD/KRW (Sell Rate): 1476.66
+- VIX: 14.92
+- HY OAS: 291.00 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
 ## 2. Target Weights (Portfolio 100%)
@@ -31,16 +31,16 @@
 ## FXW Anchor Distribution (USD/KRW, 130D KDE)
 
 - KDE Anchor (Mode): **1387.1**
-- Distribution: min=1348.5, P05=1357.4, P25=1383.8, P50=1392.6, P75=1430.2, P95=1469.7, max=1476.6
-- Current FX: 1476.63 → **above anchor (KRW weak)**
+- Distribution: min=1348.5, P05=1357.4, P25=1383.8, P50=1392.6, P75=1430.2, P95=1469.7, max=1476.7
+- Current FX: 1476.66 → **above anchor (KRW weak)**
 
 
 - FXW (KDE): 0.290
 - FX Vol (21D σ): 0.0058
 - SPX 3Y Drawdown: 0.00%
 - MacroScore: 0.610
-- ML_Risk / ML_Opp / ML_Regime: 0.168 / 0.316 / 0.404
-- Systemic Level / Bucket: 0.159 / C0
+- ML_Risk / ML_Opp / ML_Regime: 0.191 / 0.316 / 0.413
+- Systemic Level / Bucket: 0.188 / C0
 
 ## 4. Engine State
 
