@@ -175,7 +175,6 @@ def plan_cma_action(
     delta_raw = target_deploy - deployed_krw  # + => BUY, - => SELL target
 
     deadband = 5_000_000
-    action = "NO_ACTION"
     exec_delta = 0.0
 
     fx_scale = fx_scale_from_fxw(fxw)
@@ -237,8 +236,9 @@ def plan_cma_action(
             "buy_cap_krw": buy_cap,
             "sell_cap_krw": sell_cap,
             "deadband_krw": deadband,
-            "exec_delta_krw": exec_delta
+            "suggested_exec_krw": exec_delta
         },
+
         "_state_obj": st  # caller saves
     }
 
