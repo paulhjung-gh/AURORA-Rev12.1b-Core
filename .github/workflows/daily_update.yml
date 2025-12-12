@@ -40,9 +40,19 @@ jobs:
         run: |
           python scripts/build_market_json.py
 
+      - name: Inject CMA Balance (insert → data)
+        run: |
+          if [ -f insert/cma_balance.json ]; then
+            cp insert/cma_balance.json data/cma_balance.json
+            echo "[OK] cma_balance.json injected into data/"
+          else
+            echo "[WARN] insert/cma_balance.json not found. CMA overlay will fail-fast."
+          fi
+
       - name: Run AURORA Engine
         run: |
           python scripts/run_engine_auto.py
+
 
       - name: Commit and Push      # ← 반드시 여기! steps 안에!
         run: |
