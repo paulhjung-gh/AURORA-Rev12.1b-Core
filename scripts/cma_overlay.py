@@ -198,10 +198,6 @@ def plan_cma_action(
         # SELL gating: very rare
         if abs(delta_raw) < deadband:
             exec_delta = 0.0
-    else:
-        # SELL gating: very rare
-        if abs(delta_raw) < deadband:
-            exec_delta = 0.0
         else:
             # condition: S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket
             if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
@@ -214,6 +210,7 @@ def plan_cma_action(
                     exec_delta = 0.0
             else:
                 exec_delta = 0.0
+
 
     return {
         "asof_yyyymm": asof_yyyymm,
