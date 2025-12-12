@@ -135,6 +135,11 @@ def load_latest_market() -> Dict[str, Any]:
     if hy_oas is None:
         _fail("MarketData missing: risk.hy_oas (bps)")
 
+        # ✅ Unit guard: FRED BAMLH0A0HYM2 is often in percent (e.g., 2.91 == 2.91%)
+    # Engine/ML expects bps (e.g., 291)
+    if 0.0 < hy_oas < 50.0:
+        hy_oas = hy_oas * 100.0
+        
     market["risk"] = {
         "vix": float(vix),
         "hy_oas": float(hy_oas),
