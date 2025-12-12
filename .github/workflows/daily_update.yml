@@ -5,6 +5,7 @@ permissions:
 
 on:
   schedule:
+    # GitHub Actions cron is UTC. KST 09:30 == UTC 00:30
     - cron: "30 0 * * *"
   workflow_dispatch:
 
@@ -35,7 +36,7 @@ jobs:
       - name: Update FX History (KRW=X)
         run: |
           python scripts/update_fx_history.py
-          
+
       - name: Build Final Market Data JSON
         run: |
           python scripts/build_market_json.py
@@ -53,16 +54,17 @@ jobs:
         run: |
           python scripts/run_engine_auto.py
 
+      - name: Cleanup old reports & market data
+        run: |
+          python scripts/cleanup_artifacts.py
 
-      - name: Commit and Push      # ← 반드시 여기! steps 안에!
+      - name: Commit and Push
         run: |
           git config user.name "aurora-bot"
           git config user.email "aurora-bot@example.com"
 
-          # 모든 변경사항(stage)
           git add -A
 
-          # 변경 없으면 커밋 생략
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
