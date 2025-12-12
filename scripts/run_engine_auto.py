@@ -1,9 +1,9 @@
+import os
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any
-from cma_tas import CmaTasInput, compute_cma_tas
-from datetime import datetime  # datetime 사용 위해 추가
+from typing import Dict, Any, Optional
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
@@ -21,23 +21,41 @@ from engine.systemic_layer import (
     determine_systemic_bucket,
 )
 
+# CMA Overlay (new)
+# - cma_overlay.py 위치에 따라 import 경로를 맞춰야 함.
+#   권장: scripts/cma_overlay.py 로 두고, scripts 폴더에 __init__.py 추가.
+from scripts.cma_overlay import (
+    load_cma_state,
+    save_cma_state,
+    plan_cma_action,
+    allocate_risk_on,
+)
 
 DATA_DIR = Path("data")
+REPORTS_DIR = ROOT / "reports"
 
 # === Governance Protocol Rev12.1b Clamp Values ===
-GOV_MAX_SGOV = 0.80        # SGOV Floor 상한 (Rev12.1b Governance)
-GOV_MAX_SAT  = 0.20        # Satellite 최대 확장 구간 상한
-GOV_MAX_DUR  = 0.30        # Duration 상한 (MacroScore 기반 risk-on 구간)
+GOV_MAX_SGOV = 0.80
+GOV_MAX_SAT  = 0.20
+GOV_MAX_DUR  = 0.30
+
+# === Monthly flow rule (ISA 165 / Direct 235 유지, Gold ISA 10 / Direct 10) ===
+MONTHLY_ISA_KRW = 1_650_000
+MONTHLY_DIRECT_KRW = 2_350_000
+MONTHLY_TOTAL_KRW = MONTHLY_ISA_KRW + MONTHLY_DIRECT_KRW  # 4,000,000
+MONTHLY_GOLD_ISA_KRW = 100_000
+MONTHLY_GOLD_DIRECT_KRW = 100_000
+MONTHLY_GOLD_TOTAL_KRW = MONTHLY_GOLD_ISA_KRW + MONTHLY_GOLD_DIRECT_KRW  # 200,000
+
+# 고정 Gold sleeve 비중 = 200k / 4,000k = 5%
+GOLD_SLEEVE_WEIGHT = MONTHLY_GOLD_TOTAL_KRW / MONTHLY_TOTAL_KRW  # 0.05
 
 
 def load_latest_market() -> Dict[str, Any]:
-    """data/ 폴더에서 가장 최근 market_data_*.json 파일을 불러와
-    엔진이 기대하는 market 구조로 변환한다.
-    """
     files = sorted(DATA_DIR.glob("market_data_20*.json"))
     if not files:
         raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
-    
+
     latest = files[-1]
     with latest.open("r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -45,18 +63,12 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
 
-    # 1) 기본적으로 raw 내용을 그대로 옮겨 놓고
     market: Dict[str, Any] = dict(raw)
 
-    # 2)  FX block
-    usdkrw_val = (
-        raw.get("usdkrw")
-        or raw.get("usdkrw_sell")
-        or raw.get("fx_usdkrw")
-    )
+    # FX
+    usdkrw_val = raw.get("usdkrw") or raw.get("usdkrw_sell") or raw.get("fx_usdkrw")
     fx_val = float(usdkrw_val) if usdkrw_val is not None else 0.0
 
-    # 21D / 130D 히스토리 키 이름 여러 패턴 지원
     hist_21d = (
         raw.get("usdkrw_history_21d")
         or raw.get("usdkrw_hist_21d")
@@ -81,7 +93,7 @@ def load_latest_market() -> Dict[str, Any]:
     fx_block.setdefault("usdkrw_history_21d", hist_21d or [])
     fx_block.setdefault("usdkrw_history_130d", hist_130d or [])
 
-    # 3) SPX 블록 (노멀라이즈용 / drawdown 계산용)
+    # SPX
     market.setdefault("spx", {})
     spx_block = market["spx"]
     if not isinstance(spx_block, dict):
@@ -90,13 +102,9 @@ def load_latest_market() -> Dict[str, Any]:
 
     spx_block.setdefault("exposure", raw.get("spx_exposure"))
     spx_block.setdefault("drawdown_3y", raw.get("spx_drawdown_3y"))
-    # 3년 히스토리(옵션)
-    spx_block.setdefault(
-        "history_3y",
-        raw.get("spx_history_3y", raw.get("spx_history", [])),
-    )
+    spx_block.setdefault("history_3y", raw.get("spx_history_3y", raw.get("spx_history", [])))
 
-    # 4) RISK 블록: VIX, HY OAS, YC 스프레드 등
+    # RISK
     market.setdefault("risk", {})
     risk_block = market["risk"]
     if not isinstance(risk_block, dict):
@@ -105,16 +113,13 @@ def load_latest_market() -> Dict[str, Any]:
 
     vix = raw.get("vix")
     hy_oas = raw.get("hy_oas")
-    yc_spread = (
-        raw.get("yc_spread")
-        or raw.get("yc_10y_2y_spread")
-    )
+    yc_spread = raw.get("yc_spread") or raw.get("yc_10y_2y_spread")
 
     risk_block.setdefault("vix", float(vix) if vix is not None else 0.0)
     risk_block.setdefault("hy_oas", float(hy_oas) if hy_oas is not None else 0.0)
     risk_block.setdefault("yc_spread", float(yc_spread) if yc_spread is not None else 0.0)
 
-    # 5) RATES 블록: 2Y, 10Y, FFR Upper
+    # RATES
     market.setdefault("rates", {})
     rates_block = market["rates"]
     if not isinstance(rates_block, dict):
@@ -129,7 +134,7 @@ def load_latest_market() -> Dict[str, Any]:
     rates_block.setdefault("dgs10", float(dgs10) if dgs10 is not None else 0.0)
     rates_block.setdefault("ffr_upper", float(ffr_upper) if ffr_upper is not None else 0.0)
 
-    # 6) MACRO 블록: ISM, PMI, CPI YoY, Unemployment
+    # MACRO
     market.setdefault("macro", {})
     macro_block = market["macro"]
     if not isinstance(macro_block, dict):
@@ -152,7 +157,6 @@ def load_latest_market() -> Dict[str, Any]:
 
 
 def compute_fx_vol(fx_hist_21d):
-    """21D FX log-return sigma (비연율)."""
     import math
     if not fx_hist_21d or len(fx_hist_21d) < 2:
         return 0.0
@@ -169,10 +173,6 @@ def compute_fx_vol(fx_hist_21d):
 
 
 def compute_drawdown(spx_block: Dict[str, Any]) -> float:
-    """
-    3Y SPX long-horizon drawdown 계산.
-    history_3y 혹은 history_1095d 리스트가 있으면 사용.
-    """
     hist = spx_block.get("history_3y") or spx_block.get("history_1095d") or spx_block.get("history")
     if not hist:
         return 0.0
@@ -180,14 +180,10 @@ def compute_drawdown(spx_block: Dict[str, Any]) -> float:
     last = hist[-1]
     if peak <= 0:
         return 0.0
-    return (last - peak) / peak  # 예: -0.25 = -25%
+    return (last - peak) / peak  # negative in drawdown
 
 
 def compute_spx_drawdown_10y() -> float:
-    """
-    10Y SPX long-horizon drawdown 계산.
-    Japan-proof 용도로 사용. yfinance에서 10년치 ^GSPC 종가를 가져온다.
-    """
     try:
         import yfinance as yf
     except ImportError:
@@ -202,21 +198,11 @@ def compute_spx_drawdown_10y() -> float:
     last = float(prices.iloc[-1])
     if peak <= 0:
         return 0.0
-    return (last - peak) / peak  # 예: -0.45 = 지난 10년 고점 대비 -45%
+    return (last - peak) / peak  # negative
 
 
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
-    """
-    RuleSet 기반 MacroScore 구현.
-    ISM 지표는 S&P Global US Manufacturing PMI 로 대체.
-
-    ism_n = norm(ISM,45,60)
-    pmi_n = norm(PMI,45,60)
-    cpi_n = 1-norm(CPI_YoY,3,8)
-    unemp_n = 1-norm(Unemployment,3,7)
-    macro = clip(0.25*(ism_n+pmi_n+cpi_n+unemp_n),0,1)
-    """
-    ism = pmi  # ISM → PMI 대체
+    ism = pmi  # ISM -> PMI substitute
     ism_n = norm(ism, 45.0, 60.0)
     pmi_n = norm(pmi, 45.0, 60.0)
     cpi_n = 1.0 - norm(cpi_yoy, 3.0, 8.0)
@@ -226,7 +212,6 @@ def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: fl
 
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
-    """market_data JSON 을 FD/ML/Systemic 엔진 입력으로 변환."""
     fx_block = market["fx"]
     spx_block = market["spx"]
     risk = market["risk"]
@@ -252,7 +237,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     drawdown = compute_drawdown(spx_block)
     dd_10y = compute_spx_drawdown_10y()
 
-    # FXW 계산 (KDE 엔진 사용)
+    # FXW (KDE)
     engine = AuroraX121()
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     for px in fx_hist_130d[:-1]:
@@ -261,7 +246,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
-    # ML 레이어
     ml_risk = compute_ml_risk(
         vix=vix,
         hy_oas=hy_oas,
@@ -277,7 +261,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     )
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
-    # Systemic 레이어: Rev12.1b 공식 로직
     systemic_level = compute_systemic_level(
         hy_oas=hy_oas,
         yc_spread=yc_spread_bps,
@@ -311,10 +294,29 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
+def determine_state_from_signals(sig: Dict[str, float]) -> str:
+    systemic_bucket = sig["systemic_bucket"]
+    systemic_level = sig["systemic_level"]
+    vix = sig["vix"]
+    ml_risk = sig["ml_risk"]
+    dd = sig["drawdown"]  # negative
+
+    if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
+        return "S3_HARD"
+
+    if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
+        return "S2_HIGH_VOL"
+
+    if ml_risk >= 0.60 or vix >= 22.0 or dd <= -0.10:
+        return "S1_MILD"
+
+    return "S0_NORMAL"
+
+
 def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     """
-    AuroraX121 엔진을 이용해 SGOV / Satellite / Duration / Core 비중을 산출하고
-    Core/Satellite 를 세부 자산(SPX,NDX,DIV,EM,ENERGY)로 분배한다.
+    엔진 산출(SGOV/Satellite/Duration/Core)을 'Gold sleeve' 제외 나머지(=95%)에 적용.
+    Gold는 월납입 규칙(ISA10 + Direct10) 기반 고정 5%로 반영.
     """
     eng = AuroraX121()
 
@@ -325,6 +327,10 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     ml_opp = sig["ml_opp"]
     macro_score = sig["macro_score"]
     systemic_bucket = sig["systemic_bucket"]
+
+    # Gold fixed sleeve
+    gold_w = float(GOLD_SLEEVE_WEIGHT)
+    remaining = 1.0 - gold_w
 
     sgov_floor = eng.sgov_floor(
         fxw=fxw,
@@ -344,29 +350,29 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         ml_risk=ml_risk,
     )
 
-    # Governance Rev12.1b 공식 상한 반영
+    # Governance caps
     sgov_floor = max(0.0, min(GOV_MAX_SGOV, sgov_floor))
     sat_weight = max(0.0, min(GOV_MAX_SAT,  sat_weight))
     dur_weight = max(0.0, min(GOV_MAX_DUR,  dur_weight))
 
-    residual = 1.0 - (sgov_floor + sat_weight + dur_weight)
-    core_weight = max(0.0, residual)
+    # Fit within remaining budget (95%)
+    tri_sum = sgov_floor + sat_weight + dur_weight
+    if tri_sum > remaining and tri_sum > 0:
+        scale = remaining / tri_sum
+        sgov_floor *= scale
+        sat_weight *= scale
+        dur_weight *= scale
 
-    # Core 분배: RuleSet 공식 비중
-    core_config = {
-        "SPX": 0.525,
-        "NDX": 0.245,
-        "DIV": 0.230,
-    }
+    core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
+
+    # Core split (RuleSet)
+    core_config = {"SPX": 0.525, "NDX": 0.245, "DIV": 0.230}
     core_alloc = {k: core_weight * w for k, w in core_config.items()}
 
-    # Satellite 분배: EM:ENERGY = 2:1
-    em_ratio = 2.0 / 3.0
-    en_ratio = 1.0 / 3.0
-    em_w = sat_weight * em_ratio
-    en_w = sat_weight * en_ratio
+    # Satellite split (EM:ENERGY = 2:1)
+    em_w = sat_weight * (2.0 / 3.0)
+    en_w = sat_weight * (1.0 / 3.0)
 
-    # Duration / SGOV 그대로
     weights = {
         "SPX": core_alloc["SPX"],
         "NDX": core_alloc["NDX"],
@@ -375,9 +381,10 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         "ENERGY": en_w,
         "DURATION": dur_weight,
         "SGOV": sgov_floor,
+        "GOLD": gold_w,
     }
 
-    # 합이 1.0 이 되도록 미세 조정
+    # Normalize tiny float drift
     total = sum(weights.values())
     if total > 0:
         scale = 1.0 / total
@@ -386,247 +393,246 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-# ==== State 결정 로직 (엔진 기반) ====
+def load_cma_balance(path: Path = DATA_DIR / "cma_balance.json") -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError("data/cma_balance.json 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    deployed = float(obj.get("deployed_krw", 0))
+    cash = float(obj.get("cash_krw", 0))
+    asof = str(obj.get("asof_yyyymm", ""))
+    return {"asof_yyyymm": asof, "deployed_krw": deployed, "cash_krw": cash}
 
 
-def determine_state_from_signals(sig: Dict[str, float]) -> str:
+def compute_cma_overlay_section(
+    sig: Dict[str, float],
+    target_weights: Dict[str, float],
+) -> Dict[str, Any]:
     """
-    Rev12.1b FD/ML/Systemic 신호를 기반으로 한 엔진 State 레이블러.
-
-    설계 원칙:
-      - Systemic Layer 스펙을 우선: C2/C3면 무조건 하드 국면.
-      - 그 외에는 ML_Risk / VIX / 3Y Drawdown 기준으로
-        S0_NORMAL / S1_MILD / S2_HIGH_VOL 로 분류.
+    CMA Overlay 계산:
+    - 입력 (a,b)은 data/cma_balance.json
+    - state 저장/갱신은 data/cma_state.json
+    - 출력은 숫자 기반 (threshold, deploy_factor, target_deploy, delta_raw, fx_scale, suggested_exec, allocation)
     """
-    systemic_bucket = sig["systemic_bucket"]   # "C0"~"C3"
-    systemic_level = sig["systemic_level"]     # 0~1
-    vix = sig["vix"]
-    ml_risk = sig["ml_risk"]                   # 0~1
-    dd = sig["drawdown"]                       # 예: -0.25 = -25%
+    bal = load_cma_balance()
+    prev_state = load_cma_state()
 
-    # 1) Systemic C2/C3: Governance 상 '구조적 위기' → S3_HARD
-    if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
-        return "S3_HARD"
+    # dd_mag is magnitude (positive)
+    dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
+    dd_10y = float(sig.get("dd_10y", 0.0))
 
-    # 2) 높은 리스크/변동성 국면 → S2_HIGH_VOL
-    if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
-        return "S2_HIGH_VOL"
-
-    # 3) 완전 하드까지는 아니지만 스트레스가 있는 구간 → S1_MILD
-    if ml_risk >= 0.60 or vix >= 22.0 or dd <= -0.10:
-        return "S1_MILD"
-
-    # 4) 나머지는 평시 → S0_NORMAL
-    return "S0_NORMAL"
-
-
-# ==== CMA TAS Dynamic Threshold 연동 ====
-
-
-def compute_cma_section(sig: Dict[str, float]) -> Dict[str, Any]:
-    """
-    FD / ML / Systemic 신호(sig)를 받아 CMA TAS 결과 dict를 반환.
-    """
-    vix = sig["vix"]
-    hy_oas = sig["hy_oas"]
-    dd_3y = sig["drawdown"]             # engine convention: -0.25 = -25%
-    dd_10y = sig.get("dd_10y", dd_3y)   # dd_10y가 없으면 보수적으로 3Y 사용
-    ml_risk = sig["ml_risk"]
-    systemic_bucket = sig["systemic_bucket"]
-
-    # 엔진 기반 State 결정
     state_name = determine_state_from_signals(sig)
 
-    tas_input = CmaTasInput(
-        vix=vix,
-        hy_oas=hy_oas,
-        dd_3y=dd_3y,
-        dd_10y=dd_10y,
-        ml_risk=ml_risk,
-        state=state_name,
-        systemic_bucket=systemic_bucket,
+    out = plan_cma_action(
+        asof_yyyymm=bal["asof_yyyymm"],
+        deployed_krw=bal["deployed_krw"],
+        cash_krw=bal["cash_krw"],
+        fxw=float(sig["fxw"]),
+        vix=float(sig["vix"]),
+        hy_oas=float(sig["hy_oas"]),
+        dd_mag_3y=dd_mag_3y,
+        long_term_dd_10y=dd_10y,  # negative
+        ml_risk=float(sig["ml_risk"]),
+        systemic_bucket=str(sig["systemic_bucket"]),
+        final_state_name=state_name,
+        prev_cma_state=prev_state,
     )
 
-    tas_output = compute_cma_tas(tas_input)
+    # persist state
+    save_cma_state(out["_state_obj"])
+
+    suggested_exec = float(out["execution"]["suggested_exec_krw"])
+    alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
 
     return {
-        "deploy_factor": tas_output.deploy_factor,
-        "threshold": tas_output.final_threshold,
-        "meta": tas_output.meta,
+        "state": state_name,
+        "snapshot": out["cma_snapshot"],
+        "tas": out["tas"],
+        "execution": out["execution"],
+        "allocation": alloc,
     }
+
+
+def write_daily_report(
+    sig: Dict[str, Any],
+    final_weights: Dict[str, float],
+    state_name: str,
+    cma_overlay: Dict[str, Any],
+    meta: Dict[str, Any],
+) -> None:
+    """
+    Daily Report markdown:
+    경로 고정: ROOT/reports/aurora_daily_report_YYYYMMDD.md
+    섹션: 1 Market, 2 Weights, 3 Signals, 4 State, 5 CMA Overlay
+    """
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.now().date()
+    yyyymmdd = today.strftime("%Y%m%d")
+    out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
+
+    # Market summary
+    usdkrw = sig.get("fx_rate")
+    vix = sig.get("vix")
+    hy_oas = sig.get("hy_oas")
+    ust2y = sig.get("dgs2")
+    ust10y = sig.get("dgs10")
+
+    fxw = sig.get("fxw")
+    fx_vol = sig.get("fx_vol")
+    drawdown = sig.get("drawdown")
+    macro_score = sig.get("macro_score")
+    ml_risk = sig.get("ml_risk")
+    ml_opp = sig.get("ml_opp")
+    ml_regime = sig.get("ml_regime")
+    systemic_level = sig.get("systemic_level")
+    systemic_bucket = sig.get("systemic_bucket")
+
+    lines = []
+    lines.append("# AURORA Rev12.1b Daily Report")
+    lines.append("")
+    lines.append(f"- Report Date: {today.isoformat()}")
+    lines.append(f"- Engine Version: {meta.get('engine_version')}")
+    lines.append(f"- Git Commit: {meta.get('git_commit')}")
+    lines.append(f"- Run ID: {meta.get('run_id')}")
+    lines.append(f"- Timestamp(UTC): {meta.get('timestamp_utc')}")
+    lines.append("")
+
+    lines.append("## 1. Market Data Summary (FD inputs)")
+    if usdkrw is not None:
+        lines.append(f"- USD/KRW (Sell Rate): {float(usdkrw):.2f}")
+    if vix is not None:
+        lines.append(f"- VIX: {float(vix):.2f}")
+    if hy_oas is not None:
+        lines.append(f"- HY OAS: {float(hy_oas):.2f} bps")
+    if ust2y is not None and ust10y is not None:
+        lines.append(f"- UST 2Y / 10Y: {float(ust2y):.2f}% / {float(ust10y):.2f}%")
+    lines.append("")
+
+    lines.append("## 2. Target Weights (Portfolio 100%)")
+    lines.append("")
+    lines.append("| Asset   | Weight (%) |")
+    lines.append("|---------|-----------:|")
+    total = 0.0
+    for key in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV", "GOLD"]:
+        w = float(final_weights.get(key, 0.0))
+        total += w
+        lines.append(f"| {key:7s} | {w*100:10.2f} |")
+    lines.append(f"| **Total** | **{total*100:10.2f}** |")
+    lines.append("")
+
+    lines.append("## 3. FD / ML / Systemic Signals")
+    lines.append("")
+    if fxw is not None:
+        lines.append(f"- FXW (KDE): {float(fxw):.3f}")
+    if fx_vol is not None:
+        lines.append(f"- FX Vol (21D σ): {float(fx_vol):.4f}")
+    if drawdown is not None:
+        lines.append(f"- SPX 3Y Drawdown: {float(drawdown)*100:.2f}%")
+    if macro_score is not None:
+        lines.append(f"- MacroScore: {float(macro_score):.3f}")
+    if ml_risk is not None and ml_opp is not None and ml_regime is not None:
+        lines.append(
+            f"- ML_Risk / ML_Opp / ML_Regime: {float(ml_risk):.3f} / {float(ml_opp):.3f} / {float(ml_regime):.3f}"
+        )
+    if systemic_level is not None and systemic_bucket is not None:
+        lines.append(f"- Systemic Level / Bucket: {float(systemic_level):.3f} / {systemic_bucket}")
+    lines.append("")
+
+    lines.append("## 4. Engine State")
+    lines.append("")
+    lines.append(f"- Final State: {state_name}")
+    lines.append("")
+
+    # CMA Overlay (daily)
+    lines.append("## 5. CMA Overlay (TAS Dynamic Threshold) Snapshot")
+    lines.append("")
+    tas = cma_overlay.get("tas", {})
+    exe = cma_overlay.get("execution", {})
+    snap = cma_overlay.get("snapshot", {})
+    alloc = cma_overlay.get("allocation", {})
+
+    thr = tas.get("threshold")
+    df = tas.get("deploy_factor")
+    td = tas.get("target_deploy_krw")
+    dr = tas.get("delta_raw_krw")
+
+    fx_scale = exe.get("fx_scale")
+    suggested = exe.get("suggested_exec_krw")
+
+    lines.append(f"- CMA Snapshot (KRW): deployed={snap.get('deployed_krw',0):.0f}, cash={snap.get('cash_krw',0):.0f}, total={snap.get('total_cma_krw',0):.0f}, ref_base={snap.get('ref_base_krw',0):.0f}, s0_count={snap.get('s0_count',0)}")
+    if thr is not None:
+        lines.append(f"- Threshold: {float(thr)*100:.1f}%")
+    if df is not None:
+        lines.append(f"- Deploy Factor: {float(df)*100:.1f}%")
+    if td is not None:
+        lines.append(f"- Target Deploy (KRW): {float(td):.0f}")
+    if dr is not None:
+        lines.append(f"- Delta Raw (KRW): {float(dr):.0f}")
+    if fx_scale is not None:
+        lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
+    if suggested is not None:
+        lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f}")
+    lines.append("")
+
+    # Allocation table (risk-on only)
+    lines.append("| CMA Allocation (KRW) | Amount |")
+    lines.append("|----------------------|-------:|")
+    for k in ["SPX", "NDX", "DIV", "EM", "ENERGY"]:
+        lines.append(f"| {k:20s} | {float(alloc.get(k,0.0)):.0f} |")
+    lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"[REPORT] Daily report written to: {out_path}")
 
 
 def main():
     market = load_latest_market()
     sig = build_signals(market)
     weights = compute_portfolio_target(sig)
-
-    # 엔진 기반 State 계산
     state_name = determine_state_from_signals(sig)
 
-    # CMA TAS 계산
-    cma = compute_cma_section(sig)
+    # CMA overlay (daily, based on cma_balance.json)
+    cma_overlay = compute_cma_overlay_section(sig, weights)
 
-    print("[INFO] ==== FD / ML / Systemic Summary ====")
-    print(f"FX: {sig['fx_rate']:.2f}, FXW: {sig['fxw']:.3f}, FX vol(21D): {sig['fx_vol']:.4f}")
-    print(f"VIX: {sig['vix']:.2f}, HY OAS(bps): {sig['hy_oas']:.1f}, Drawdown(3Y): {sig['drawdown']:.3f}")
-    print(f"YC spread(bps): {sig['yc_spread_bps']:.1f}, FFR Upper: {sig['ffr_upper']:.2f}")
-    print(
-        f"MacroScore: {sig['macro_score']:.3f}, ML_Risk: {sig['ml_risk']:.3f}, "
-        f"ML_Opp: {sig['ml_opp']:.3f}, ML_Regime: {sig['ml_regime']:.3f}"
-    )
-    print(f"Systemic Level: {sig['systemic_level']:.3f}, Bucket: {sig['systemic_bucket']}")
-    print(f"Engine State: {state_name}")
-    print("[INFO] ==== Target Portfolio Weights (AURORA Rev12.1b) ====")
-    for k in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV"]:
-        print(f"  {k}: {weights[k]*100:5.2f}%")
+    # Console summary (optional)
+    print("[INFO] ==== 3. FD / ML / Systemic Signals ====")
+    print(f"FXW (KDE): {sig['fxw']:.3f}")
+    print(f"FX Vol (21D σ): {sig['fx_vol']:.4f}")
+    print(f"SPX 3Y Drawdown: {sig['drawdown']*100:.2f}%")
+    print(f"MacroScore: {sig['macro_score']:.3f}")
+    print(f"ML_Risk / ML_Opp / ML_Regime: {sig['ml_risk']:.3f} / {sig['ml_opp']:.3f} / {sig['ml_regime']:.3f}")
+    print(f"Systemic Level / Bucket: {sig['systemic_level']:.3f} / {sig['systemic_bucket']}")
+    print("[INFO] ==== 4. Engine State ====")
+    print(f"Final State: {state_name}")
 
-    print("[INFO] ==== CMA TAS (Dynamic Threshold) ====")
-    print(
-        f"  Threshold: {cma['threshold']*100:4.1f}%, "
-        f"Deploy Factor: {cma['deploy_factor']*100:4.1f}%"
-    )
+    print("[INFO] ==== 5. CMA Overlay Snapshot ====")
+    print(f"Threshold: {cma_overlay['tas']['threshold']*100:.1f}%")
+    print(f"Deploy Factor: {cma_overlay['tas']['deploy_factor']*100:.1f}%")
 
-    # 결과를 JSON 으로 저장 (Level-4 자동화 대비)
+    # Output JSON (with meta)
     today = datetime.now().strftime("%Y%m%d")
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
+    meta = {
+        "engine_version": "AURORA-Rev12.1b",
+        "git_commit": os.getenv("GITHUB_SHA", ""),
+        "run_id": os.getenv("GITHUB_RUN_ID", ""),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
     out = {
         "date": today,
-        "signals": {
-            **sig,
-            "state": state_name,
-        },
+        "meta": meta,
+        "signals": {**sig, "state": state_name},
         "weights": weights,
-        "cma": cma,
+        "cma_overlay": cma_overlay,
     }
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
     print(f"[OK] Target weights JSON saved to: {out_path}")
 
-    # 오늘 신호(sig) + 최종 비중(weights) + State + CMA 기준으로 리포트 생성
-    write_daily_report(sig, weights, state_name, cma)
+    # Report
+    write_daily_report(sig, weights, state_name, cma_overlay, meta)
 
-def write_daily_report(
-    market_data: Dict[str, Any],
-    final_weights: Dict[str, float],
-    state_name: str,
-    cma: Dict[str, Any],
-) -> None:
-    """
-    아주 단순한 Daily Report를 markdown 파일로 저장.
-    - market_data: 오늘 FD/ML/Systemic 신호 dict (sig)
-    - final_weights: 엔진 최종 타겟 비중 dict (0~1)
-    - state_name: 엔진이 판단한 최종 State (S0_NORMAL 등)
-    - cma: CMA TAS 결과 dict (threshold, deploy_factor 등)
-    """
-    print("[REPORT] write_daily_report called")  # 디버그용
-
-    # 오늘 날짜
-    today = datetime.now().date()
-
-    # 리포트 저장 폴더: data/reports (연도 디렉토리 제거)
-    reports_dir = DATA_DIR / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    fname = f"{today.isoformat()}_simple_report.md"
-    out_path = reports_dir / fname
-
-    # 1) 마켓 데이터 요약 부분 만들기 (필요한 것만 간단히)
-    # market_data 는 sig 딕셔너리라고 보면 됨
-    usdkrw = market_data.get("fx_rate")
-    vix = market_data.get("vix")
-    hy_oas = market_data.get("hy_oas")
-    ust2y = market_data.get("dgs2")
-    ust10y = market_data.get("dgs10")
-
-    # FD / ML / Systemic 주요 신호 추출
-    fxw = market_data.get("fxw")
-    fx_vol = market_data.get("fx_vol")
-    drawdown = market_data.get("drawdown")
-    macro_score = market_data.get("macro_score")
-    ml_risk = market_data.get("ml_risk")
-    ml_opp = market_data.get("ml_opp")
-    ml_regime = market_data.get("ml_regime")
-    systemic_level = market_data.get("systemic_level")
-    systemic_bucket = market_data.get("systemic_bucket")
-
-    lines = []
-
-    lines.append("# AURORA Rev12.1b Simple Daily Report")
-    lines.append("")
-    lines.append(f"- Report Date: {today.isoformat()}")
-    lines.append("")
-    lines.append("## 1. Market Data (요약)")
-
-    if usdkrw is not None:
-        lines.append(f"- USD/KRW (Sell Rate): {usdkrw:.2f}")
-    if vix is not None:
-        lines.append(f"- VIX: {vix:.2f}")
-    if hy_oas is not None:
-        lines.append(f"- HY OAS: {hy_oas:.2f} bps")
-    if ust2y is not None and ust10y is not None:
-        lines.append(f"- UST 2Y / 10Y: {ust2y:.2f}% / {ust10y:.2f}%")
-    lines.append("")
-
-    # 2) 최종 타겟 비중 테이블
-    lines.append("## 2. Final Target Weights (Portfolio 100%)")
-    lines.append("")
-    lines.append("| Asset   | Weight (%) |")
-    lines.append("|---------|-----------:|")
-
-    total = 0.0
-    for key in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV", "GOLD"]:
-        w = float(final_weights.get(key, 0.0))
-        total += w
-        lines.append(f"| {key:7s} | {w*100:10.2f} |")
-
-    lines.append(f"| **Total** | **{total*100:10.2f}** |")
-    lines.append("")
-
-    # 3) FD / ML / Systemic Signals
-    lines.append("## 3. FD / ML / Systemic Signals")
-    lines.append("")
-    if fxw is not None:
-        lines.append(f"- FXW (KDE): {fxw:.3f}")
-    if fx_vol is not None:
-        lines.append(f"- FX Vol (21D σ): {fx_vol:.4f}")
-    if drawdown is not None:
-        lines.append(f"- SPX 3Y Drawdown: {drawdown*100:.2f}%")
-    if macro_score is not None:
-        lines.append(f"- MacroScore: {macro_score:.3f}")
-    if ml_risk is not None and ml_opp is not None and ml_regime is not None:
-        lines.append(
-            f"- ML_Risk / ML_Opp / ML_Regime: "
-            f"{ml_risk:.3f} / {ml_opp:.3f} / {ml_regime:.3f}"
-        )
-    if systemic_level is not None and systemic_bucket is not None:
-        lines.append(
-            f"- Systemic Level / Bucket: {systemic_level:.3f} / {systemic_bucket}"
-        )
-    lines.append("")
-
-    # 4) Engine State
-    lines.append("## 4. Engine State")
-    lines.append("")
-    lines.append(f"- Final State: {state_name}")
-    lines.append("")
-
-    # 5) CMA TAS (Dynamic Threshold) Snapshot
-    lines.append("## 5. CMA TAS (Dynamic Threshold) Snapshot")
-    lines.append("")
-    thr = cma.get("threshold")
-    df = cma.get("deploy_factor")
-    if thr is not None:
-        lines.append(f"- Threshold: {thr*100:.1f}%")
-    if df is not None:
-        lines.append(f"- Deploy Factor: {df*100:.1f}%")
-    lines.append("")
-
-    content = "\n".join(lines)
-
-    out_path.write_text(content, encoding="utf-8")
-    print(f"[REPORT] Simple daily report written to: {out_path}")
 
 if __name__ == "__main__":
     main()
