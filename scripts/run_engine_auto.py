@@ -173,6 +173,13 @@ def load_latest_market() -> Dict[str, Any]:
 
     # P0-4 Unit Guards
     _assert_range("VIX(level)", vix_f, 5.0, 80.0)
+
+    # HY OAS: deterministic unit normalization
+    # - If 0 < value < 50, treat as percent points from FRED and convert to bps (×100)
+    # - Then enforce bps range.
+    if 0.0 < hy_oas_f < 50.0:
+        hy_oas_f = hy_oas_f * 100.0
+
     _assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
 
     market["risk"] = {
