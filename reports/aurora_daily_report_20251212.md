@@ -2,13 +2,13 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: c8dbea7d22c6d38991e122541cd423a459b1958b
-- Run ID: 20164609700
-- Timestamp(UTC): 2025-12-12T10:58:48.888275+00:00
+- Git Commit: f2c266fcf5dcf05aa54c652ab36cd4bf463e151f
+- Run ID: 20164899752
+- Timestamp(UTC): 2025-12-12T11:10:34.883181+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1476.16
-- VIX: 15.21
+- USD/KRW (Sell Rate): 1475.60
+- VIX: 15.16
 - HY OAS: 2.91 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
@@ -16,23 +16,23 @@
 
 | Asset   | Weight (%) |
 |---------|-----------:|
-| SPX     |      29.13 |
-| NDX     |      13.59 |
-| DIV     |      12.76 |
+| SPX     |      29.14 |
+| NDX     |      13.60 |
+| DIV     |      12.77 |
 | EM      |       6.00 |
 | ENERGY  |       3.00 |
 | DURATION |       0.00 |
-| SGOV    |      30.51 |
+| SGOV    |      30.50 |
 | GOLD    |       5.00 |
 | **Total** | **    100.00** |
 
 ## 3. FD / ML / Systemic Signals
 
-- FXW (KDE): 0.291
+- FXW (KDE): 0.292
 - FX Vol (21D σ): 0.0058
 - SPX 3Y Drawdown: 0.00%
 - MacroScore: 0.651
-- ML_Risk / ML_Opp / ML_Regime: 0.171 / 0.316 / 0.405
+- ML_Risk / ML_Opp / ML_Regime: 0.170 / 0.317 / 0.405
 - Systemic Level / Bucket: 0.151 / C0
 
 ## 4. Engine State
@@ -41,12 +41,12 @@
 
 ## 5. CMA Overlay (TAS Dynamic Threshold) Snapshot
 
-- CMA Snapshot (KRW): deployed=15000000, cash=25000000, total=40000000, ref_base=40000000, s0_count=5
+- CMA Snapshot (KRW): deployed=15000000, cash=25000000, total=40000000, ref_base=40000000, s0_count=6
 - Threshold: 18.0%
 - Deploy Factor: 0.0%
 - Target Deploy (KRW): 0
 - Delta Raw (KRW): -15000000
-- FX Scale (BUY only): 0.874
+- FX Scale (BUY only): 0.875
 - Suggested Exec (KRW): 0
 
 | CMA Allocation (KRW, based on Suggested Exec) | Amount |
