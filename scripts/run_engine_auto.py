@@ -221,6 +221,28 @@ def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: fl
     macro = 0.25 * (ism_n + pmi_n + cpi_n + unemp_n)
     return clip(macro, 0.0, 1.0)
 
+def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, float]:
+    import numpy as np
+    from scipy.stats import gaussian_kde
+
+    data = np.asarray(fx_hist_130d, dtype=float)
+
+    kde = gaussian_kde(data)
+    x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
+    density = kde(x)
+
+    anchor = float(x[np.argmax(density)])
+
+    return {
+        "anchor": anchor,
+        "p05": float(np.percentile(data, 5)),
+        "p25": float(np.percentile(data, 25)),
+        "p50": float(np.percentile(data, 50)),
+        "p75": float(np.percentile(data, 75)),
+        "p95": float(np.percentile(data, 95)),
+        "min": float(data.min()),
+        "max": float(data.max()),
+    }
 
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
