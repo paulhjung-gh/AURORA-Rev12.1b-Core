@@ -56,7 +56,9 @@ def _fail(msg: str) -> None:
 
 
 # =========================
-# P0-4: Unit Guards (strict fail, no auto-convert)
+# P0-4: Unit Guards + Deterministic Normalization
+# - "정규화 가능한 범위"에서는 자동 정규화(로그 남김)
+# - 그 외는 strict fail
 # =========================
 def _assert_range(name: str, x: float, lo: float, hi: float) -> float:
     if not (lo <= x <= hi):
@@ -79,6 +81,56 @@ def _clean_float_series(xs: list, name: str) -> list[float]:
             continue
         out.append(fv)
     return out
+
+
+def _normalize_pct_from_fraction(x: float, name: str) -> float:
+    """
+    Some sources deliver rates as fractions (e.g., 0.0413) instead of percent (4.13).
+    Deterministic rule:
+      - if 0 < x < 1: treat as fraction and convert to percent (×100)
+    """
+    if 0.0 < x < 1.0:
+        old = x
+        x = x * 100.0
+        print(f"[UNIT] {name} normalized: fraction->pct ({old} -> {x})")
+    return x
+
+
+def _normalize_policy_rate_pct(x: float, name: str) -> float:
+    """
+    FFR Upper may appear as:
+      - percent: 3.75
+      - bps: 375
+      - fraction: 0.0375
+    Deterministic rule (no guessing):
+      - if 0 < x < 1: fraction -> percent (×100)
+      - elif 50 <= x < 1000: bps -> percent (/100)
+      - else: assume percent
+    """
+    if 0.0 < x < 1.0:
+        old = x
+        x = x * 100.0
+        print(f"[UNIT] {name} normalized: fraction->pct ({old} -> {x})")
+    elif 50.0 <= x < 1000.0:
+        old = x
+        x = x / 100.0
+        print(f"[UNIT] {name} normalized: bps->pct ({old} -> {x})")
+    return x
+
+
+def _normalize_macro_pct(x: float, name: str) -> float:
+    """
+    CPI YoY / Unemployment may appear as:
+      - percent: 3.02
+      - fraction: 0.0302
+    Deterministic rule:
+      - if 0 < x < 1: fraction -> percent (×100)
+    """
+    if 0.0 < x < 1.0:
+        old = x
+        x = x * 100.0
+        print(f"[UNIT] {name} normalized: fraction->pct ({old} -> {x})")
+    return x
 
 
 def load_latest_market() -> Dict[str, Any]:
@@ -178,14 +230,15 @@ def load_latest_market() -> Dict[str, Any]:
     vix_f = float(vix)
     hy_oas_f = float(hy_oas)
 
-    # P0-4 Unit Guards
+    # Unit Guards
     _assert_range("VIX(level)", vix_f, 5.0, 80.0)
 
     # HY OAS: deterministic unit normalization
     # - If 0 < value < 50, treat as percent points and convert to bps (×100)
     if 0.0 < hy_oas_f < 50.0:
+        old = hy_oas_f
         hy_oas_f *= 100.0
-        print(f"[UNIT] HY_OAS normalized: percent->bps ({hy_oas} -> {hy_oas_f})")
+        print(f"[UNIT] HY_OAS normalized: percent->bps ({old} -> {hy_oas_f})")
 
     _assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
 
@@ -210,7 +263,12 @@ def load_latest_market() -> Dict[str, Any]:
     dgs10_f = float(dgs10)
     ffr_f = float(ffr_upper)
 
-    # P0-4 Unit Guards: yields and policy rates are % (not bps)
+    # Deterministic normalization
+    dgs2_f = _normalize_pct_from_fraction(dgs2_f, "UST2Y")
+    dgs10_f = _normalize_pct_from_fraction(dgs10_f, "UST10Y")
+    ffr_f = _normalize_policy_rate_pct(ffr_f, "FFR_Upper")
+
+    # Unit Guards (after normalize)
     _assert_range("UST2Y(%)", dgs2_f, 0.0, 25.0)
     _assert_range("UST10Y(%)", dgs10_f, 0.0, 25.0)
     _assert_range("FFR_Upper(%)", ffr_f, 0.0, 25.0)
@@ -237,7 +295,11 @@ def load_latest_market() -> Dict[str, Any]:
     cpi_f = float(cpi_yoy)
     unemp_f = float(unemp)
 
-    # P0-4 Unit Guards: macro values are %
+    # Deterministic normalization
+    cpi_f = _normalize_macro_pct(cpi_f, "CPI_YoY")
+    unemp_f = _normalize_macro_pct(unemp_f, "Unemployment")
+
+    # Unit Guards (after normalize)
     _assert_range("PMI(points)", pmi_f, 0.0, 100.0)
     _assert_range("CPI_YoY(%)", cpi_f, -20.0, 50.0)
     _assert_range("Unemployment(%)", unemp_f, 0.0, 30.0)
@@ -365,7 +427,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
 
     engine = AuroraX121()
-
     for px in fx_hist_130d:
         engine.kde.add(float(px))
 
@@ -375,7 +436,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
     # P0-2 fail-fast: anchor가 분포 극하단으로 튀면 입력 시계열이 잘못 들어온 것으로 간주
-    # (수식 변경 아님. “잘못된 입력을 거부”하는 determinism enforcement)
     anchor = float(fx_kde["anchor"])
     p05 = float(fx_kde["p05"])
     if anchor < (p05 - 10.0):
