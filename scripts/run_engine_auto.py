@@ -449,7 +449,10 @@ def compute_cma_overlay_section(
     # Always compute risk-on basket target weights (normalized)
     basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
     denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
-    basket_w = {k: (max(0.0, float(target_weights.get(k, 0.0))) / denom if denom > 0 else 0.0) for k in basket}
+    risk_on_w = {
+        k: (max(0.0, float(target_weights.get(k, 0.0))) / denom if denom > 0 else 0.0)
+        for k in basket
+    }
 
     return {
         "state": state_name,
@@ -457,7 +460,7 @@ def compute_cma_overlay_section(
         "tas": out["tas"],
         "execution": out["execution"],
         "allocation": alloc,
-        "risk_on_target_weights": basket_w,
+        "risk_on_target_weights": risk_on_w,
     }
 
 
@@ -558,6 +561,8 @@ def write_daily_report(
     exe = cma_overlay.get("execution", {})
     snap = cma_overlay.get("snapshot", {})
     alloc = cma_overlay.get("allocation", {})
+    risk_on_w = cma_overlay.get("risk_on_target_weights", {})
+
 
     thr = tas.get("threshold")
     df = tas.get("deploy_factor")
