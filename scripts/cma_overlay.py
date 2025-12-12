@@ -105,7 +105,7 @@ def maybe_roll_ref_base(
 
     cond = (
         dd_mag >= 0.20 and
-        state_name == "S1_MILD" and
+        state_name.startswith("S1") and
         ml_risk < 0.70 and
         systemic_bucket in ("C0", "C1")
     )
@@ -149,7 +149,7 @@ def plan_cma_action(
     st = prev_cma_state or CMAState(ref_base_krw=total, s0_count=0, asof_yyyymm=asof_yyyymm)
 
     # update s0_count (2~3 months consecutive)
-    if final_state_name == "S0_NORMAL":
+    if final_state_name.startswith("S0"):
         st.s0_count += 1
     else:
         st.s0_count = 0
@@ -196,6 +196,9 @@ def plan_cma_action(
             exec_delta = 0.0
     else:
         # SELL gating: very rare
+        if abs(delta_raw) < deadband:
+            exec_delta = 0.0
+        else:
         # condition: S0_NORMAL 2~3개월 연속 + systemic C0/C1 + min ticket
         if st.s0_count >= 2 and systemic_bucket in ("C0", "C1"):
             sell_amt = min(abs(delta_raw), sell_cap)
