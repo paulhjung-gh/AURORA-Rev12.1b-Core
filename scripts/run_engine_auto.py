@@ -79,23 +79,7 @@ def load_latest_market() -> Dict[str, Any]:
         if generated is not None and str(generated) != today:
             _fail(f"STALE market data: meta.generated_yyyymmdd={generated}, today={today}, file={latest.name}")
 
-    with latest.open("r", encoding="utf-8") as f:
-        raw = json.load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
-
-    # ✅ Data freshness (DATE ONLY, ignore time)
-    # market_data_YYYYMMDD.json 내부에 meta.generated_yyyymmdd 가 있으면 오늘 날짜와 일치해야 함
-    today = datetime.now().strftime("%Y%m%d")
-    meta = raw.get("meta", {})
-    if isinstance(meta, dict):
-        generated = meta.get("generated_yyyymmdd") or meta.get("date") or meta.get("generated_date")
-        if generated is not None and str(generated) != today:
-            _fail(f"STALE market data: meta.generated_yyyymmdd={generated}, today={today}, file={latest.name}")
-
     market: Dict[str, Any] = dict(raw)
-
 
     # --- FX block ---
     fx = raw.get("fx", {})
@@ -126,19 +110,16 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(spx, dict):
         spx = {}
 
-    # build_market_json.py 기준: spx.last / spx.closes_3y_1095
     spx_last = spx.get("last") or raw.get("spx_last") or raw.get("spx")
     closes_3y = spx.get("closes_3y_1095") or spx.get("history_3y") or raw.get("spx_3y_closes_1095")
     if spx_last is None:
         _fail("MarketData missing: spx.last")
     if not isinstance(closes_3y, list) or len(closes_3y) < 200:
-        # 1095가 이상적이지만, 최소한으로도 drawdown 계산이 성립해야 함
         _fail("MarketData missing/insufficient: spx.closes_3y_1095 (need meaningful series)")
 
     market["spx"] = {
         "last": float(spx_last),
         "closes_3y_1095": [float(x) for x in closes_3y],
-        # optional: if build 단계에서 10y closes를 넣으면 여기서 그대로 사용
         "closes_10y": spx.get("closes_10y") or raw.get("spx_10y_closes"),
     }
 
@@ -182,7 +163,6 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(macro, dict):
         macro = {}
 
-    # fetch_market_data.py가 latest에 무엇을 넣는지에 따라 alias가 필요할 수 있음
     pmi = macro.get("pmi_markit") or macro.get("pmi") or raw.get("pmi_markit") or raw.get("pmi_sp_global")
     cpi_yoy = macro.get("cpi_yoy") or raw.get("cpi_yoy_pct") or raw.get("cpi_yoy")
     unemp = macro.get("unemployment") or raw.get("unemp_rate_pct") or raw.get("unemployment_rate")
@@ -196,7 +176,7 @@ def load_latest_market() -> Dict[str, Any]:
         "unemployment": float(unemp),
     }
 
-    # --- ETF block (optional for report/validation) ---
+    # --- ETF block (optional) ---
     etf = raw.get("etf") or raw.get("etf_close") or {}
     if not isinstance(etf, dict):
         etf = {}
@@ -272,10 +252,8 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, float]:
     if isinstance(closes_10y, list) and len(closes_10y) >= 200:
         dd_10y = compute_drawdown_from_series([float(x) for x in closes_10y])
     else:
-        # 10Y series가 없으면 3Y drawdown을 보수적 proxy로 사용 (다운로드 금지)
         dd_10y = float(drawdown)
 
-    # FXW (KDE): 130d series must exist
     engine = AuroraX121()
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     for px in fx_hist_130d[:-1]:
@@ -387,12 +365,10 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         ml_risk=ml_risk,
     )
 
-    # Governance caps
     sgov_floor = max(0.0, min(GOV_MAX_SGOV, sgov_floor))
     sat_weight = max(0.0, min(GOV_MAX_SAT,  sat_weight))
     dur_weight = max(0.0, min(GOV_MAX_DUR,  dur_weight))
 
-    # Fit within remaining budget (95%)
     tri_sum = sgov_floor + sat_weight + dur_weight
     if tri_sum > remaining and tri_sum > 0:
         scale = remaining / tri_sum
@@ -402,11 +378,9 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
     core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
 
-    # Core split (RuleSet)
     core_config = {"SPX": 0.525, "NDX": 0.245, "DIV": 0.230}
     core_alloc = {k: core_weight * w for k, w in core_config.items()}
 
-    # Satellite split (EM:ENERGY = 2:1)
     em_w = sat_weight * (2.0 / 3.0)
     en_w = sat_weight * (1.0 / 3.0)
 
@@ -421,7 +395,6 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         "GOLD": gold_w,
     }
 
-    # Normalize tiny float drift
     total = sum(weights.values())
     if total > 0:
         scale = 1.0 / total
@@ -447,7 +420,6 @@ def load_cma_balance(path: Path = None) -> Dict[str, Any]:
         "cash_krw": cash,
         "ref_base_krw": ref_base,
     }
-
 
 
 def compute_cma_overlay_section(
@@ -615,18 +587,14 @@ def write_daily_report(
         lines.append(f"- Delta Raw (KRW): {float(dr):.0f}")
     if fx_scale is not None:
         lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
-    if fx_scale is not None:
-        lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
 
-    # ✅ Suggested Exec: KRW + % of total CMA
-    if suggested is not None:
-        total_cma = float(snap.get("total_cma_krw", 0.0))
-        pct = (abs(float(suggested)) / total_cma * 100.0) if total_cma > 0 else 0.0
-        lines.append(f"- Suggested Exec (KRW): {float(suggested):.0f} ({pct:.2f}% of total CMA)")
-        direction = "BUY" if float(suggested) > 0 else ("SELL" if float(suggested) < 0 else "HOLD")
-    lines.append(f"- Suggested Exec: {direction} {float(suggested):.0f} KRW ({pct:.2f}% of total CMA)")
+    # ✅ Suggested Exec: 단일 라인(중복 제거) + 안전 처리
+    total_cma = float(snap.get("total_cma_krw", 0.0))
+    suggested_v = float(suggested) if suggested is not None else 0.0
+    pct = (abs(suggested_v) / total_cma * 100.0) if total_cma > 0 else 0.0
+    direction = "BUY" if suggested_v > 0 else ("SELL" if suggested_v < 0 else "HOLD")
+    lines.append(f"- Suggested Exec: {direction} {suggested_v:.0f} KRW ({pct:.2f}% of total CMA)")
     lines.append("")
-
 
     lines.append("| CMA Allocation (KRW, based on Suggested Exec) | Amount |")
     lines.append("|----------------------------------------------|-------:|")
