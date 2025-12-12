@@ -443,6 +443,7 @@ def compute_cma_overlay_section(
         asof_yyyymm=bal["asof_yyyymm"],
         deployed_krw=bal["deployed_krw"],
         cash_krw=bal["cash_krw"],
+        ref_base_krw=bal["ref_base_krw"],
         fxw=float(sig["fxw"]),
         vix=float(sig["vix"]),
         hy_oas=float(sig["hy_oas"]),
