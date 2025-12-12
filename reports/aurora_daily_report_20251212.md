@@ -2,9 +2,9 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: cb32f8bb6227db1243a6b257191a941283b11457
-- Run ID: 20157255512
-- Timestamp(UTC): 2025-12-12T05:25:02.213560+00:00
+- Git Commit: c05bb17e60b5b55769e57b82cadcd7ba0cedf845
+- Run ID: 20158757456
+- Timestamp(UTC): 2025-12-12T06:47:17.852631+00:00
 
 ## 1. Market Data Summary (FD inputs)
 - USD/KRW (Sell Rate): 1470.52
