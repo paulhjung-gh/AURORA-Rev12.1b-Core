@@ -87,48 +87,54 @@ class Decision:
 # ==================== KDE 동적 Anchor 클래스 ====================
 class KDE_AdaptiveFXW:
     def __init__(self, window: int = 130, alpha: float = 0.01):
-        # 최근 FX 샘플 최대 130개까지 사용
         self.window = window
         self.alpha = alpha
         self.buffer = deque(maxlen=window)
 
+    def preload(self, fx_series) -> None:
+        """
+        ✅ 반드시 run 시작 시 130 trading days 시계열을 먼저 주입
+        fx_series: iterable of floats (oldest -> newest 권장)
+        """
+        for fx in fx_series:
+            self.add(fx)
+
     def add(self, fx: float) -> None:
-        """FX 시계열 한 점을 추가."""
         try:
             self.buffer.append(float(fx))
         except (TypeError, ValueError):
-            # 이상치/None 들어오면 그냥 무시
             return
 
     def fxw(self, fx: float) -> float:
         """
-        FXW = sigmoid(alpha * (fx - anchor))
-        - 샘플이 2개 미만이면 anchor = 현재 fx 값 (완전 중립 0.5)
-        - 샘플이 2개 이상이면 KDE 기반 앵커 사용
+        FXW = 1 / (1 + exp(alpha * (FX - anchor)))
+        anchor = pure KDE mode of buffer (>=2 samples)
         """
-        # 샘플이 부족하면 데이터 기반이지만 중립적인 상태로 시작
         if len(self.buffer) < 2:
-            anchor = float(fx)
-        else:
-            data = np.asarray(self.buffer, dtype=float)
-            # KDE 기반 앵커
-            kde = gaussian_kde(data)
-            x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
-            density = kde(x)
-            anchor = float(x[np.argmax(density)])
+            # ✅ preload가 정상이라면 여기에 거의 안 걸림
+            # 그래도 deterministic하게 처리하려면 예외를 던지는 편이 안전
+            raise ValueError("FXW buffer not preloaded with sufficient history (need >=2, ideally 130).")
+
+        data = np.asarray(self.buffer, dtype=float)
+        kde = gaussian_kde(data)
+        x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
+        density = kde(x)
+        anchor = float(x[np.argmax(density)])  # pure KDE mode
 
         raw = self.alpha * (float(fx) - anchor)
-        # 로지스틱 스쿼싱으로 [0,1] 범위
         fxw_val = 1.0 / (1.0 + math.exp(raw))
         return max(0.0, min(1.0, fxw_val))
 
 
 # ========================= 메인 엔진 클래스 =========================
 class AuroraX121:
-    def __init__(self):
+    def __init__(self, fx_history_130=None):
         self.kde = KDE_AdaptiveFXW(window=130)
+        if fx_history_130 is not None:
+            self.kde.preload(fx_history_130)
 
     def fxw(self, fx_rate: float) -> float:
+        # 최신값도 buffer에 포함시켜 rolling update
         self.kde.add(fx_rate)
         return self.kde.fxw(fx_rate)
 
