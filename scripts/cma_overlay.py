@@ -183,7 +183,6 @@ def plan_cma_action(
 
     # BUY execution (only if cash available)
     if abs(delta_raw) < deadband:
-        action = "NO_ACTION"
         exec_delta = 0.0
     elif delta_raw > 0:
         # planned buy
@@ -193,9 +192,7 @@ def plan_cma_action(
             # FXW applies to BUY only
             buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
             exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
-            action = "BUY" if exec_delta >= 5_000_000 else "NO_ACTION"
         else:
-            action = "NO_ACTION"
             exec_delta = 0.0
     else:
         # SELL gating: very rare
@@ -206,12 +203,9 @@ def plan_cma_action(
             sell_amt = round(sell_amt / 10_000_000) * 10_000_000
             if sell_amt >= 10_000_000:
                 exec_delta = -sell_amt
-                action = "SELL"
             else:
-                action = "NO_ACTION"
                 exec_delta = 0.0
         else:
-            action = "NO_ACTION"
             exec_delta = 0.0
 
     return {
