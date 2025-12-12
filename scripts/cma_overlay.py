@@ -1,8 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import date
 import json
-import math
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -184,16 +182,16 @@ def plan_cma_action(
     # BUY execution (only if cash available)
     if abs(delta_raw) < deadband:
         exec_delta = 0.0
-    elif delta_raw > 0:
-        # planned buy
-        buy_amt = min(delta_raw, cash_krw, buy_cap)
-        buy_amt = _round_to_5m(buy_amt)
-        if buy_amt >= 5_000_000:
-            # FXW applies to BUY only
-            buy_amt_scaled = _round_to_5m(buy_amt * fx_scale)
-            exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
-        else:
-            exec_delta = 0.0
+elif delta_raw > 0:
+    # planned buy (FXW applied first, single rounding)
+    buy_amt = min(delta_raw, cash_krw, buy_cap)
+    buy_amt_scaled = buy_amt * fx_scale
+    buy_amt_scaled = _round_to_5m(buy_amt_scaled)
+
+    if buy_amt_scaled >= 5_000_000:
+        exec_delta = max(0.0, min(buy_amt_scaled, cash_krw))
+    else:
+        exec_delta = 0.0
     else:
         # SELL gating: very rare
         if abs(delta_raw) < deadband:
