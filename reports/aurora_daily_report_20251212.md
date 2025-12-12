@@ -2,13 +2,13 @@
 
 - Report Date: 2025-12-12
 - Engine Version: AURORA-Rev12.1b
-- Git Commit: e1fdfef0ba446efb8d4275759b340bb96dbeec8f
-- Run ID: 20167452128
-- Timestamp(UTC): 2025-12-12T12:57:17.534577+00:00
+- Git Commit: 05f28cd6987b390f65feb8d78fe93f3c8f8ee82e
+- Run ID: 20168876495
+- Timestamp(UTC): 2025-12-12T13:53:11.818542+00:00
 
 ## 1. Market Data Summary (FD inputs)
-- USD/KRW (Sell Rate): 1474.39
-- VIX: 15.17
+- USD/KRW (Sell Rate): 1476.77
+- VIX: 15.02
 - HY OAS: 2.91 bps
 - UST 2Y / 10Y: 3.54% / 4.13%
 
@@ -16,24 +16,24 @@
 
 | Asset   | Weight (%) |
 |---------|-----------:|
-| SPX     |      29.16 |
-| NDX     |      13.61 |
-| DIV     |      12.77 |
+| SPX     |      29.13 |
+| NDX     |      13.59 |
+| DIV     |      12.76 |
 | EM      |       6.00 |
 | ENERGY  |       3.00 |
 | DURATION |       0.00 |
-| SGOV    |      30.47 |
+| SGOV    |      30.52 |
 | GOLD    |       5.00 |
 | **Total** | **    100.00** |
 
 ## 3. FD / ML / Systemic Signals
 
-- FXW (KDE): 0.294
-- FX Vol (21D σ): 0.0057
+- FXW (KDE): 0.290
+- FX Vol (21D σ): 0.0058
 - SPX 3Y Drawdown: 0.00%
-- MacroScore: 0.651
-- ML_Risk / ML_Opp / ML_Regime: 0.169 / 0.318 / 0.404
-- Systemic Level / Bucket: 0.151 / C0
+- MacroScore: 0.610
+- ML_Risk / ML_Opp / ML_Regime: 0.169 / 0.316 / 0.404
+- Systemic Level / Bucket: 0.159 / C0
 
 ## 4. Engine State
 
@@ -46,7 +46,7 @@
 - Deploy Factor: 0.0%
 - Target Deploy (KRW): 0
 - Delta Raw (KRW): 0
-- FX Scale (BUY only): 0.877
+- FX Scale (BUY only): 0.874
 - Suggested Exec: HOLD 0 KRW (0.00% of total CMA)
 
 | CMA Allocation (KRW, based on Suggested Exec) | Amount |
