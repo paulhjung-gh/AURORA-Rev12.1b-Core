@@ -82,7 +82,6 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
         html = resp.text
         soup = BeautifulSoup(html, "html.parser")
 
-        # 1) 최신 값: 본문 문장 전체에서 패턴 검색
         text_all = " ".join(soup.stripped_strings)
 
         m = re.search(
@@ -102,7 +101,6 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
 
         latest_value = float(m.group(1))
 
-        # 2) Historical 12개월: 안 되면 경고만 찍고 빈 리스트 허용
         historical: List[float] = []
         try:
             table = soup.find("table", {"id": "calendar"}) or soup.find(
@@ -110,7 +108,7 @@ def fetch_sp_global_pmi() -> Tuple[float, List[float]]:
             )
             if table:
                 rows = table.find_all("tr")
-                for row in rows[1:13]:  # 헤더 제외 후 12개 행
+                for row in rows[1:13]:
                     cells = row.find_all("td")
                     if not cells:
                         continue
@@ -146,11 +144,11 @@ def fetch_all() -> Dict[str, Any]:
     어떤 시리즈라도 비어 있으면 예외를 던진다.
     """
     hy_oas_data = fetch_fred_data("BAMLH0A0HYM2")   # HY OAS (bps)
-    dgs2_data = fetch_fred_data("DGS2")             # 2Y Treasury Yield
-    dgs10_data = fetch_fred_data("DGS10")           # 10Y Treasury Yield
-    ffr_data = fetch_fred_data("DFEDTARU")          # FFR Upper
+    dgs2_data = fetch_fred_data("DGS2")             # 2Y Treasury Yield (%)
+    dgs10_data = fetch_fred_data("DGS10")           # 10Y Treasury Yield (%)
+    ffr_data = fetch_fred_data("DFEDTARU")          # FFR Upper (%)
     cpi_index_data = fetch_fred_data("CPIAUCSL")    # CPI Index
-    unemployment_data = fetch_fred_data("UNRATE")   # Unemployment Rate
+    unemployment_data = fetch_fred_data("UNRATE")   # Unemployment Rate (%)
 
     for name, series in [
         ("HY_OAS", hy_oas_data),
@@ -177,10 +175,10 @@ def fetch_all() -> Dict[str, Any]:
     }
 
     history = {
-        "pmi_12m": pmi_hist[-12:],           # 최대 12개
-        "cpi_13m": cpi_index_data[-13:],     # YoY 계산용 13개월
-        "dgs2_30d": dgs2_data[-30:],         # 최근 1개월 금리
-        "dgs10_30d": dgs10_data[-30:],       # 최근 1개월 금리
+        "pmi_12m": pmi_hist[-12:],
+        "cpi_13m": cpi_index_data[-13:],
+        "dgs2_30d": dgs2_data[-30:],
+        "dgs10_30d": dgs10_data[-30:],
     }
 
     return {
@@ -190,7 +188,6 @@ def fetch_all() -> Dict[str, Any]:
 
 
 def save_to_json(data: Dict[str, Any], filename: str) -> None:
-    # 날짜(YYYYMMDD)만 박아서 업데이트 여부를 검증 (시간 저장은 하지 않음)
     today = datetime.utcnow().strftime("%Y%m%d")
     data.setdefault("meta", {})
     if not isinstance(data["meta"], dict):
