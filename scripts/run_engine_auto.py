@@ -422,6 +422,10 @@ def load_cma_balance(path: Path = None) -> Dict[str, Any]:
     }
 
 
+def _find_latest_cma_state_file() -> Path | None:
+    files = sorted(DATA_DIR.glob("cma_state_20*.json"))
+    return files[-1] if files else None
+
 def compute_cma_overlay_section(
     sig: Dict[str, float],
     target_weights: Dict[str, float],
@@ -430,7 +434,13 @@ def compute_cma_overlay_section(
 
     today = datetime.now().strftime("%Y%m%d")
     cma_state_path = DATA_DIR / f"cma_state_{today}.json"
-    prev_state = load_cma_state(cma_state_path)
+
+    # ✅ prev_state: 오늘 파일이 없으면 "가장 최근 파일"에서 이어받기
+    if cma_state_path.exists():
+        prev_state = load_cma_state(cma_state_path)
+    else:
+        latest_prev = _find_latest_cma_state_file()
+        prev_state = load_cma_state(latest_prev) if latest_prev else None
 
     dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
     dd_10y = float(sig.get("dd_10y", 0.0))
@@ -472,6 +482,7 @@ def compute_cma_overlay_section(
         "allocation": alloc,
         "risk_on_target_weights": risk_on_w,
     }
+
 
 
 def write_daily_report(
