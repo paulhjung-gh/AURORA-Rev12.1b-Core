@@ -406,7 +406,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
 
 def load_cma_balance(path: Path = None) -> Dict[str, Any]:
-    # 운영 기준: data/cma_balance.json (월초에 업데이트 후 커밋)
+    # 운영 기준: insert/cma_balance.json (월초에 업데이트 후 커밋)
     if path is None:
         path = DATA_DIR / "cma_balance.json"
     if not path.exists():
