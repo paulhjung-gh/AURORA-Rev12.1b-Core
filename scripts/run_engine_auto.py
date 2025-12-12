@@ -590,27 +590,31 @@ def write_daily_report(
     lines.append("")
 
     lines.append("## 3. FD / ML / Systemic Signals")
-    fx_kde = sig.get("fx_kde", {})
-fx_rate = sig.get("fx_rate")
+    lines.append("")
 
-if fx_kde:
-    lines.append("## FXW Anchor Distribution (USD/KRW, 130D KDE)")
-    lines.append("")
-    lines.append(f"- KDE Anchor (Mode): **{fx_kde['anchor']:.1f}**")
-    lines.append(
-        f"- Distribution: "
-        f"min={fx_kde['min']:.1f}, "
-        f"P05={fx_kde['p05']:.1f}, "
-        f"P25={fx_kde['p25']:.1f}, "
-        f"P50={fx_kde['p50']:.1f}, "
-        f"P75={fx_kde['p75']:.1f}, "
-        f"P95={fx_kde['p95']:.1f}, "
-        f"max={fx_kde['max']:.1f}"
-    )
-    if fx_rate is not None:
-        pos = "below anchor (KRW strong)" if fx_rate < fx_kde["anchor"] else "above anchor (KRW weak)"
-        lines.append(f"- Current FX: {fx_rate:.2f} → **{pos}**")
-    lines.append("")
+    # === FXW Anchor Distribution (KDE, 130D) ===
+    fx_kde = sig.get("fx_kde", {})
+    fx_rate = sig.get("fx_rate")
+
+    if fx_kde:
+        lines.append("## FXW Anchor Distribution (USD/KRW, 130D KDE)")
+        lines.append("")
+        lines.append(f"- KDE Anchor (Mode): **{fx_kde['anchor']:.1f}**")
+        lines.append(
+            f"- Distribution: "
+            f"min={fx_kde['min']:.1f}, "
+            f"P05={fx_kde['p05']:.1f}, "
+            f"P25={fx_kde['p25']:.1f}, "
+            f"P50={fx_kde['p50']:.1f}, "
+            f"P75={fx_kde['p75']:.1f}, "
+            f"P95={fx_kde['p95']:.1f}, "
+            f"max={fx_kde['max']:.1f}"
+        )
+        if fx_rate is not None:
+            pos = "below anchor (KRW strong)" if float(fx_rate) < float(fx_kde["anchor"]) else "above anchor (KRW weak)"
+            lines.append(f"- Current FX: {float(fx_rate):.2f} → **{pos}**")
+        lines.append("")
+
 
     lines.append("")
     if fxw is not None:
