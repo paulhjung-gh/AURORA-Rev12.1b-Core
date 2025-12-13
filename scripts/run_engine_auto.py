@@ -552,7 +552,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
     core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
 
-    # Core baseline (Rev12.1b/12.2/12.3 consistent)
+    # Core baseline (Rev12.1b consistent)
     core_config = {"SPX": 0.525, "NDX": 0.245, "DIV": 0.230}
     core_alloc = {k: core_weight * w for k, w in core_config.items()}
 
