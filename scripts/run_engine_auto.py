@@ -491,7 +491,6 @@ def load_cma_state():
         print("[ERROR] CMA state files not found. Please ensure the file is present in the data folder.")
         return None
     
-    # 최신 파일을 선택
     latest_cma_file = cma_files[-1]
     print(f"[DEBUG] Loading CMA state from: {latest_cma_file}")
 
@@ -500,17 +499,31 @@ def load_cma_state():
             cma_state = json.load(f)
             print(f"[DEBUG] CMA state loaded successfully: {cma_state}")
 
-            # cma_balance에서 deployed_krw 값 확인
-            if 'cma_balance' not in cma_state:
-                print("[ERROR] 'cma_balance' not found in CMA state.")
-                return None
+            # cma_balance.json 파일 로드 (필요한 값 병합)
+            cma_balance_file = DATA_DIR / "cma_balance.json"
+            if cma_balance_file.exists():
+                with cma_balance_file.open("r", encoding="utf-8") as balance_f:
+                    cma_balance = json.load(balance_f)
+                    print(f"[DEBUG] cma_balance loaded successfully: {cma_balance}")
 
-            cma_balance = cma_state['cma_balance']
-            if 'deployed_krw' not in cma_balance:
-                print("[ERROR] 'deployed_krw' is missing in 'cma_balance'.")
-                return None
-            
-            print(f"[DEBUG] deployed_krw: {cma_balance['deployed_krw']}")
+                    # cma_balance에서 'deployed_krw' 값을 cma_state에 병합
+                    if 'cma_balance' not in cma_state:
+                        cma_state['cma_balance'] = {}
+
+                    cma_state['cma_balance'].update(cma_balance)
+                    print(f"[DEBUG] cma_balance merged into CMA state: {cma_state['cma_balance']}")
+
+            # 'cma_balance'가 없다면 default 값을 추가
+            if 'cma_balance' not in cma_state:
+                print("[WARN] 'cma_balance' not found in CMA state. Adding default values.")
+                cma_state['cma_balance'] = {
+                    "deployed_krw": 0.0,
+                    "cash_krw": 0.0,
+                    "ref_base_krw": 0.0,
+                    "s0_count": 0,
+                    "last_s0_yyyymm": "202512"
+                }
+
             return cma_state
     except Exception as e:
         print(f"[ERROR] Failed to load CMA state: {e}")
