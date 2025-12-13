@@ -702,7 +702,7 @@ def write_daily_report(
     systemic_bucket = sig.get("systemic_bucket")
 
     lines = []
-    lines.append("# AURORA Rev12.1b Daily Report")
+    lines.append("# AURORA Rev12.3 Daily Report")
     lines.append("")
     lines.append(f"- Report Date: {today.isoformat()}")
     lines.append(f"- Engine Version: {meta.get('engine_version')}")
