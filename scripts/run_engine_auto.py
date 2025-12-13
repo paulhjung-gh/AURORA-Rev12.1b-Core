@@ -540,7 +540,7 @@ def main():
     print(f"ML_Risk / ML_Opp / ML_Regime: {sig['ml_risk']:.3f} / {sig['ml_opp']:.3f} / {sig.get('ml_regime', 0.5):.3f}")
     print(f"Systemic Level / Bucket: {sig['systemic_level']:.3f} / {sig['systemic_bucket']}")
     print(f"Yield Curve Spread (10Y-2Y bps): {sig['yc_spread']:.1f}")
-
+ 
     print("[INFO] ==== 4. Engine State ====")
     print(f"Final State: {state_name}")
 
