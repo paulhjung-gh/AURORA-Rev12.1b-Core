@@ -537,23 +537,31 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     if cma_state is None:
         _fail("CMA state is None. Please ensure the state is loaded correctly.")
 
-    # cma_balance에서 deployed_krw 값 가져오기
+    # cma_balance에서 'deployed_krw' 값을 cma_state에 병합
     cma_balance = cma_state.get('cma_balance', {})
     deployed_krw = cma_balance.get('deployed_krw', 0.0)
-    if deployed_krw == 0.0:
-        print("[ERROR] 'deployed_krw' is 0. Please check the cma_balance in the CMA state.")
-    
+
     today_str = datetime.now().strftime("%Y%m")
+
+    # 누락된 인자 추가
+    long_term_dd = sig.get('drawdown', 0.0)
+    ml_risk = sig.get('ml_risk', 0.0)
+    systemic_bucket = sig.get('systemic_bucket', 'C0')
+    final_state_name = "S0_NORMAL"  # 예시로 "S0_NORMAL"을 사용, 필요에 따라 동적으로 설정
+    prev_cma_state = cma_state  # 이전 CMA 상태를 전달
 
     tas_output = plan_cma_action(
         today_str,
-        deployed_krw,  # deployed_krw를 사용
-        cma_state['cma_balance']['cash_krw'],  # cash_krw도 cma_balance에서 가져옵니다.
+        deployed_krw,
+        cma_state['cma_balance']['cash_krw'],
         cma_state['cma_balance']['ref_base_krw'],
         sig["fxw"],
         abs(sig["drawdown"]),
-        "S0_NORMAL",
-        cma_state,
+        final_state_name,
+        prev_cma_state,  # 필수 인자 추가
+        long_term_dd,    # 필수 인자 추가
+        ml_risk,         # 필수 인자 추가
+        systemic_bucket  # 필수 인자 추가
     )
 
     exec_delta = tas_output.suggested_exec_krw(cma_state['cma_balance']['cash_krw'])
