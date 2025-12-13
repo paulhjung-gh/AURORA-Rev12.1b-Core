@@ -1,6 +1,6 @@
 {
   "meta": {
-    "engine_version": "AURORA Rev12.1b",
+    "engine_version": "AURORA Rev12.2",
     "description": "Deterministic RuleSet for FXW, MacroScore, Drawdown, FXVol, ML, Systemic, State, SGOV Floor, Satellite, Duration, CMA, CoreEquity.",
     "last_updated": "2025-12-10"
   },
@@ -10,7 +10,7 @@
     "window_days": 130,
     "sigmoid": {
       "formula": "FXW = 1 / (1 + exp(alpha * (latest_fx - anchor)))",
-      "alpha": 0.01
+      "alpha": 0.0075
     }
   },
 
@@ -105,12 +105,12 @@
         "fx_ge_1600": 0.05
       },
       "ml_penalty": {
-        "formula": "max(0, ML_Risk - 0.60) * 0.08"
+        "formula": "max(0, ML_Risk - 0.60) * 0.05"
       },
       "systemic_penalty": {
         "C0": 0.00,
-        "C1": 0.05,
-        "C2": 0.10,
+        "C1": 0.03,
+        "C2": 0.06,
         "C3": 0.20
       }
     },
