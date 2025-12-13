@@ -601,6 +601,16 @@ def _find_latest_cma_state_file() -> Path | None:
     files = sorted(DATA_DIR.glob("cma_state_20*.json"))
     return files[-1] if files else None
 
+def fx_scale_from_fxw(fxw: float) -> float:
+    """
+    FXW 값에 따라 FX 스케일을 계산하는 함수
+    """
+    if fxw <= 0.2:
+        return 0.5  # 예시값, FXW가 낮을 때 스케일링
+    elif fxw <= 0.5:
+        return 0.75  # 예시값, FXW가 중간일 때 스케일링
+    else:
+        return 1.0  # 예시값, FXW가 높을 때 스케일링
 
 def compute_cma_overlay_section(
     sig: Dict[str, float],
