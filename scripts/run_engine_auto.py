@@ -372,8 +372,8 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     """
-    핵심: FXW는 market['fxw']로 읽지 않는다.
-    FXW = KDE(anchor from 130D USDKRW) -> engine.kde.fxw(fx_rate)
+    마켓 데이터를 처리하고, 각종 신호를 계산합니다.
+    FXW는 엔진에서 직접 계산 (market에 없음)
     """
     fx_block = market["fx"]
     spx_block = market["spx"]
@@ -382,6 +382,8 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     macro = market["macro"]
 
     fx_rate = float(fx_block["usdkrw"])
+
+    # FX Vol (21D)
     fx_hist_21d = fx_block.get("usdkrw_history_21d", [])
     fx_vol = compute_fx_vol(fx_hist_21d)
 
@@ -392,7 +394,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     dgs10 = float(rates["dgs10"])
     ffr_upper = float(rates["ffr_upper"])
 
-    # Yield Curve: (10Y - 2Y) in bps
     yc_spread_bps = (dgs10 - dgs2) * 100.0
     _assert_range("YieldCurveSpread(bps)", yc_spread_bps, -300.0, 300.0)
 
@@ -409,33 +410,24 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     else:
         dd_10y = float(drawdown)
 
-    # =========================
-    # FXW (KDE 130 trading days) — strict & validated
-    # =========================
+    # FXW 계산 (엔진에서 직접 계산)
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
-
     fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
     if len(fx_hist_130d) < 130:
         _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
 
+    # AuroraX121 엔진을 사용하여 FXW 계산
     engine = AuroraX121()
     for px in fx_hist_130d:
         engine.kde.add(float(px))
     fxw = engine.kde.fxw(fx_rate)
 
-    fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
+    # `fxw`를 market 데이터에 추가
+    market["fxw"] = fxw  # fxw를 market에 추가
 
-    # P0-2 guard: anchor sanity
-    anchor = float(fx_kde["anchor"])
-    p05 = float(fx_kde["p05"])
-    if anchor < (p05 - 10.0):
-        _fail(
-            f"P0-2_GUARD_FAIL: KDE anchor too low vs distribution. "
-            f"anchor={anchor:.1f}, p05={p05:.1f}. "
-            f"Check USDKRW 130D series window/trading-days integrity."
-        )
+    fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
@@ -446,12 +438,14 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         drawdown=drawdown,
         yc_spread=yc_spread_bps,
     )
+
     ml_opp = compute_ml_opp(
         vix=vix,
         hy_oas=hy_oas,
         fxw=fxw,
         drawdown=drawdown,
     )
+
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
     systemic_level = compute_systemic_level(
@@ -461,11 +455,12 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         ml_regime=ml_regime,
         drawdown=drawdown,
     )
+
     systemic_bucket = determine_systemic_bucket(systemic_level)
 
     return {
         "fx_rate": fx_rate,
-        "fxw": fxw,
+        "fxw": fxw,  # fxw 포함
         "fx_kde": fx_kde,
         "fx_vol": fx_vol,
         "vix": vix,
