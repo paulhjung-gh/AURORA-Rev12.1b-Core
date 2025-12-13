@@ -486,6 +486,10 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
 def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
     cma_state = load_cma_state()
 
+    # cma_state가 None인 경우를 처리
+    if cma_state is None:
+        _fail("CMA state is None. Please ensure the state is loaded correctly.")
+
     today_str = datetime.now().strftime("%Y%m")
 
     tas_output = plan_cma_action(
