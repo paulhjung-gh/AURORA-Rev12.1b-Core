@@ -410,7 +410,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     else:
         dd_10y = float(drawdown)
 
-    # FXW 계산 (엔진에서 직접 계산)
+    # FXW 계산 (엔진에서 직접)
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
@@ -481,6 +481,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         "systemic_level": systemic_level,
         "systemic_bucket": systemic_bucket,
     }
+
 
 
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
