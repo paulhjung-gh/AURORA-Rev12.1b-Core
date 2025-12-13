@@ -1,5 +1,3 @@
-# aurora/strategy/cma_tas.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -24,6 +22,7 @@ class CmaTasInput:
     - ml_risk         : ML_Risk in [0,1]
     - state           : engine state label, e.g. "S0_NORMAL", "S1_MILD", ...
     - systemic_bucket : systemic bucket label, e.g. "C0", "C1", "C2", "C3"
+    - alpha_tilt      : Alpha tilt applied to adjust portfolio weights
     """
     vix: float
     hy_oas: float
@@ -32,6 +31,7 @@ class CmaTasInput:
     ml_risk: float
     state: str
     systemic_bucket: str
+    alpha_tilt: Dict[str, float]  # New field for alpha tilt values
 
 
 @dataclass
@@ -91,7 +91,6 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
     # 0. State / Systemic gating (Governance-level hard filters)
     # -------------------------------------------------------
 
-    # Allow both full labels ("S0_NORMAL") and shorthand ("S0")
     state = inp.state
     if state in ("S0", "S1"):
         normalized_state = state
@@ -103,8 +102,6 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
         normalized_state = state
 
     # 기본 규칙:
-    # - S0, S1 에서만 CMA TAS 활성
-    # - Systemic C2, C3에서는 CMA 중단
     state_ok = normalized_state in ("S0", "S1")
     systemic_ok = inp.systemic_bucket in ("C0", "C1")
 
@@ -114,7 +111,6 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
     meta["gates"]["systemic_ok"] = systemic_ok
 
     if not state_ok or not systemic_ok:
-        # Hard stop: 자동으로 CMA overlay를 꺼버리는 구간
         meta["gates"]["reason"] = "blocked_by_state_or_systemic"
         return CmaTasOutput(
             deploy_factor=0.0,
@@ -171,7 +167,6 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
     # 2. Deploy 규칙
     # -------------------------------------------------------
 
-    # 2-1. DD 정규화
     dd = _normalize_dd(inp.dd_3y)
     meta["deploy_components"]["dd_3y_raw"] = inp.dd_3y
     meta["deploy_components"]["dd_3y_normalized"] = dd
@@ -183,7 +178,6 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
         meta["deploy_components"]["below_threshold"] = False
         denom = (0.60 - final_threshold)
         if denom <= 0.0:
-            # 방어 코드
             deploy_raw = 1.0
             meta["deploy_components"]["denom_zero_guard"] = True
         else:
@@ -214,6 +208,9 @@ def compute_cma_tas(inp: CmaTasInput) -> CmaTasOutput:
     # 2-4. 최종 clip
     deploy_factor = clip(deploy_raw, 0.0, 1.0)
     meta["deploy_components"]["deploy_factor"] = deploy_factor
+
+    # Apply Alpha Tilt to final deploy_factor
+    deploy_factor *= inp.alpha_tilt.get("CMA", 1.0)
 
     return CmaTasOutput(
         deploy_factor=deploy_factor,
