@@ -34,6 +34,7 @@
 - MacroScore: 0.610
 - ML_Risk / ML_Opp / ML_Regime: 0.197 / 0.315 / 0.416
 - Systemic Level / Bucket: 0.186 / C0
+- Yield Curve Spread (10Y-2Y bps): 62.0
 
 ### FXW Anchor Distribution (USD/KRW, 130D KDE)
 - KDE Anchor (Mode): 1387.1 | min=1348.5, p05=1357.4, p50=1392.8, p95=1470.4, max=1477.3
@@ -43,7 +44,7 @@
 - Final State: S0_NORMAL
 
 ## 5. CMA Overlay (External) Snapshot
-- CMA Snapshot (KRW): deployed=0, cash=12000, total=12000, ref_base=0, s0_count=1
+- CMA Snapshot (KRW): deployed=1, cash=12000, total=12001, ref_base=1, s0_count=1
 - Threshold: 18.0%
 - Deploy Factor: 0.0%
 - Target Deploy (KRW): 0

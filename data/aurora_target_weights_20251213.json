@@ -52,12 +52,11 @@
   "cma_overlay": {
     "state": "S0_NORMAL",
     "snapshot": {
-      "deployed_krw": 0.0,
+      "deployed_krw": 1.0,
       "cash_krw": 12000.0,
-      "total_cma_krw": 12000.0,
-      "ref_base_krw": 0.0,
-      "ref_base_mode": "not_set",
-      "ref_base_add_krw": 0.0,
+      "total_cma_krw": 12001.0,
+      "ref_base_krw": 1.0,
+      "ref_base_mode": "operator_fixed",
       "s0_count": 1,
       "last_s0_yyyymm": "202512"
     },
@@ -65,14 +64,13 @@
       "threshold": 0.18,
       "deploy_factor": 0.0,
       "target_deploy_krw": 0.0,
-      "delta_raw_krw": 0.0
+      "delta_raw_krw": -1.0
     },
     "execution": {
       "fxw": 0.28856439321490757,
-      "fx_scale": 0.8731386359289445,
-      "buy_cap_krw": 1800.0,
-      "sell_cap_krw": 1200.0,
-      "deadband_krw": 5000000.0,
+      "fx_scale": 0.75,
+      "buy_cap_krw": 1800.1499999999999,
+      "sell_cap_krw": 1200.1000000000001,
       "suggested_exec_krw": 0.0
     },
     "allocation": {

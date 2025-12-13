@@ -1,7 +1,3 @@
-# scripts/run_engine_auto.py
-# Rev12.3-final baseline + (CMA overlay external) / FXW is computed from 130D KDE, never read from market JSON.
-# Note: CMA는 외부 자금이며, 내부 target weights를 변경하지 않는다. (Overlay는 별도 섹션/리포트로만 제공)
-
 import os
 import sys
 import json
@@ -490,8 +486,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         "systemic_bucket": systemic_bucket,
     }
 
-
-
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
     systemic_bucket = sig["systemic_bucket"]
     systemic_level = sig["systemic_level"]
@@ -513,7 +507,6 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
         return "S1_MILD"
 
     return "S0_NORMAL"
-
 
 def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     """
@@ -613,6 +606,18 @@ def _find_latest_cma_state_file() -> Path | None:
     files = sorted(DATA_DIR.glob("cma_state_20*.json"))
     return files[-1] if files else None
 
+def fx_scale_from_fxw(fxw: float) -> float:
+    """
+    FXW 값에 따라 FX 스케일을 계산하는 함수.
+    예시로 들어둔 값은 나중에 실제 로직에 맞게 수정해야 합니다.
+    """
+    # FXW가 0~1 사이의 값을 가지므로, 예를 들어 fxw에 맞춰서 적절한 스케일을 계산하는 방식으로 바꿔야 함
+    if fxw <= 0.2:
+        return 0.5  # FXW가 낮을 때 스케일링 비율
+    elif fxw <= 0.5:
+        return 0.75  # FXW가 중간일 때 스케일링 비율
+    else:
+        return 1.0  # FXW가 높은 경우 스케일링 비율
 
 def compute_cma_overlay_section(
     sig: Dict[str, float],
@@ -728,6 +733,7 @@ def write_daily_report(
         f"{float(sig['ml_risk']):.3f} / {float(sig['ml_opp']):.3f} / {float(sig['ml_regime']):.3f}"
     )
     lines.append(f"- Systemic Level / Bucket: {float(sig['systemic_level']):.3f} / {sig['systemic_bucket']}")
+    lines.append(f"- Yield Curve Spread (10Y-2Y bps): {sig['yc_spread_bps']:.1f}")
     lines.append("")
 
     fx_kde = sig.get("fx_kde", {})
