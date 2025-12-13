@@ -1,10 +1,10 @@
 {
   "date": "20251213",
   "meta": {
-    "engine_version": "AURORA-Rev12.1b",
-    "git_commit": "35e63fca6e860d5318fc733a011dd6c086b1ab75",
-    "run_id": "20186248359",
-    "timestamp_utc": "2025-12-13T03:42:58.320216+00:00"
+    "engine_version": "AURORA-Rev12.3-final (Core) + CMA Overlay",
+    "git_commit": "c3528e4078d5ef24087285f3fee0e7b75a7eacac",
+    "run_id": "20196774689",
+    "timestamp_utc": "2025-12-13T19:26:54.893401+00:00"
   },
   "signals": {
     "fx_rate": 1477.300048828125,
@@ -52,12 +52,11 @@
   "cma_overlay": {
     "state": "S0_NORMAL",
     "snapshot": {
-      "deployed_krw": 0.0,
+      "deployed_krw": 1.0,
       "cash_krw": 12000.0,
-      "total_cma_krw": 12000.0,
-      "ref_base_krw": 0.0,
-      "ref_base_mode": "not_set",
-      "ref_base_add_krw": 0.0,
+      "total_cma_krw": 12001.0,
+      "ref_base_krw": 1.0,
+      "ref_base_mode": "operator_fixed",
       "s0_count": 1,
       "last_s0_yyyymm": "202512"
     },
@@ -65,14 +64,13 @@
       "threshold": 0.18,
       "deploy_factor": 0.0,
       "target_deploy_krw": 0.0,
-      "delta_raw_krw": 0.0
+      "delta_raw_krw": -1.0
     },
     "execution": {
       "fxw": 0.28856439321490757,
-      "fx_scale": 0.8731386359289445,
-      "buy_cap_krw": 1800.0,
-      "sell_cap_krw": 1200.0,
-      "deadband_krw": 5000000.0,
+      "fx_scale": 0.75,
+      "buy_cap_krw": 1800.1499999999999,
+      "sell_cap_krw": 1200.1000000000001,
       "suggested_exec_krw": 0.0
     },
     "allocation": {
