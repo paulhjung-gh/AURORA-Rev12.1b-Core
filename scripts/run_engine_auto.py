@@ -34,11 +34,6 @@ from scripts.cma_overlay import (
 DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
-# =========================
-# Rev12.2 Meta (single source of truth for report/json label)
-# =========================
-ENGINE_VERSION = "AURORA Rev12.2"
-
 # === Governance Protocol Clamp Values (운영 cap) ===
 GOV_MAX_SGOV = 0.80
 GOV_MAX_SAT  = 0.20
@@ -707,7 +702,7 @@ def write_daily_report(
     systemic_bucket = sig.get("systemic_bucket")
 
     lines = []
-    lines.append(f"# {meta.get('engine_version', ENGINE_VERSION)} Daily Report")
+    lines.append("# AURORA Rev12.1b Daily Report")
     lines.append("")
     lines.append(f"- Report Date: {today.isoformat()}")
     lines.append(f"- Engine Version: {meta.get('engine_version')}")
@@ -828,18 +823,6 @@ def write_daily_report(
         lines.append(f"| {k:20s} | {float(alloc.get(k,0.0)):.0f} |")
     lines.append("")
 
-    # =========================
-    # Optional A: MDD 2종 병기 (값이 있으면 출력, 없으면 N/A)
-    # - 정확한 계산은 별도 backtest/series가 필요하므로 이 스크립트는 표시만 담당
-    # =========================
-    core_mdd = sig.get("core_equity_mdd_ref")
-    total_mdd = sig.get("total_portfolio_mdd")
-    lines.append("## 6. MDD Reference (Optional)")
-    lines.append("")
-    lines.append(f"- Core Equity MDD (reference): {core_mdd if core_mdd is not None else 'N/A'}")
-    lines.append(f"- Total Portfolio MDD (investor-experienced): {total_mdd if total_mdd is not None else 'N/A'}")
-    lines.append("")
-
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[REPORT] Daily report written to: {out_path}")
 
@@ -870,7 +853,7 @@ def main():
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
     meta = {
-        "engine_version": ENGINE_VERSION,
+        "engine_version": "AURORA-Rev12.1b",
         "git_commit": os.getenv("GITHUB_SHA", ""),
         "run_id": os.getenv("GITHUB_RUN_ID", ""),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
