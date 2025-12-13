@@ -9,15 +9,26 @@ from scipy.stats import gaussian_kde
 from collections import deque
 
 # ============================================
-# AuroraX Rev12.2 – Final Synced Engine (Python)
+# AuroraX Rev12.3-duration-sigmoid (based on Rev12.1b-KDE)
 # Full Deterministic Edition with KDE Dynamic Anchor
 #
 # Rev12.2: Defense layers retained, response coefficients dampened to reduce over-shielding.
 #
-# Matches Governance Protocol (12.1b-KDE baseline),
-# Whitepaper 12.1b-KDE baseline,
-# Market Data FD Spec, ML Layer 12.1b, Systemic Layer 12.1b,
-# and RuleSet (must be updated to Rev12.2 coefficients).
+# Rev12.3 Change Log (핵심 변경점):
+#   - Duration ramp: linear -> sigmoid (same gate, same endpoints 5% @0.70, 15% @0.90)
+#
+# Notes:
+#   - All Signals inputs (fx, vix, fx_vol, drawdown,
+#     macro_score, ffr_upper, ml_* fields, systemic_level)
+#     are deterministically defined by upstream FD components:
+#       * FXW from USD/KRW sell-rate with KDE dynamic anchor
+#       * fx_vol from 21D log-return sigma (non-annualized)
+#       * drawdown from 3Y SPX window
+#       * macro_score from ISM/PMI/CPI YoY/Unemployment
+#       * ffr_upper from FRED DFEDTARU
+#   - Engine formulas themselves are unchanged from Rev12.1,
+#     ensuring strict backward compatibility while removing
+#     any external scalar input dependency.
 # ============================================
 
 
@@ -155,9 +166,27 @@ class AuroraX121:
         return base + expansion
 
     def duration_target(self, macro_score: float, fxw: float, ml_risk: float) -> float:
+        # Gate (unchanged): macro_score >= 0.70, fxw >= 0.55, ml_risk <= 0.50
         if macro_score < 0.70 or fxw < 0.55 or ml_risk > 0.50:
             return 0.0
-        return 0.05 + 0.10 * (macro_score - 0.70) / 0.20
+
+        # Rev12.3: Duration ramp uses sigmoid (same endpoints: 5% @0.70, 15% @0.90)
+        # 목적: linear 대비 weight 반응을 더 부드럽게(smoother response) 만들기
+        k = 12.0  # curvature (fixed constant for Rev12.3)
+
+        def sigmoid(z: float) -> float:
+            return 1.0 / (1.0 + math.exp(-z))
+
+        # Center at 0.80, normalize to guarantee exact endpoints in [0.70, 0.90]
+        s  = sigmoid(k * (macro_score - 0.80))
+        s0 = sigmoid(k * (0.70 - 0.80))
+        s1 = sigmoid(k * (0.90 - 0.80))
+
+        denom = (s1 - s0)
+        s_norm = (s - s0) / denom if denom != 0 else 0.0
+        s_norm = max(0.0, min(1.0, s_norm))
+
+        return 0.05 + 0.10 * s_norm
 
     def cma_usage(self, cma_bal: float, drawdown: float, fxw: float, ml_opp: float, ml_risk: float) -> float:
         if drawdown < 0.10 or fxw < 0.35 or ml_opp < 0.65 or ml_risk >= 0.90:

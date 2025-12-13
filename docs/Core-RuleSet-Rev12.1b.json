@@ -1,8 +1,12 @@
 {
   "meta": {
-    "engine_version": "AURORA Rev12.2",
-    "description": "Deterministic RuleSet for FXW, MacroScore, Drawdown, FXVol, ML, Systemic, State, SGOV Floor, Satellite, Duration, CMA, CoreEquity.",
-    "last_updated": "2025-12-10"
+    "engine_version": "AURORA Rev12.3-duration-sigmoid",
+    "description": "Deterministic RuleSet for FXW, MacroScore, Drawdown, FXVol, ML, Systemic, State, SGOV Floor, Satellite, Duration (sigmoid continuous), CMA, CoreEquity.",
+    "last_updated": "2025-12-13",
+    "changelog": [
+      "Rev12.3: Duration hard macro gate removed to eliminate 0%→5% jump at MacroScore=0.70.",
+      "Rev12.3: Duration now uses sigmoid normalized ramp (continuous 0%→15%) with exact endpoints at MacroScore 0.70/0.90."
+    ]
   },
 
   "fxw": {
@@ -140,16 +144,33 @@
   },
 
   "duration": {
-    "description": "Duration exposure allowed only in S0/S1 between 5% and 15%.",
+    "description": "Duration exposure allowed only in S0/S1, computed as continuous sigmoid normalized ramp from 0% to 15% (no macro hard gate).",
     "range": [0.0, 0.15],
     "allowed_states": ["S0_NORMAL", "S1_MILD"],
+
     "activation": {
-      "macro_score_min": 0.70,
       "fxw_min": 0.55,
       "ml_risk_max": 0.50
     },
-    "base_target": 0.05,
-    "max_target": 0.15
+
+    "shape": {
+      "type": "sigmoid_normalized_ramp",
+      "sigmoid": "sigmoid(z) = 1 / (1 + exp(-z))",
+      "params": {
+        "lo": 0.70,
+        "hi": 0.90,
+        "center": 0.75,
+        "k": 18.0,
+        "max_target": 0.15
+      },
+      "normalization": {
+        "rule": "s_norm = clip((sigmoid(k*(m-center)) - sigmoid(k*(lo-center))) / (sigmoid(k*(hi-center)) - sigmoid(k*(lo-center))), 0, 1)",
+        "m": "macro_score"
+      },
+      "formula": "duration_target = max_target * s_norm"
+    },
+
+    "note": "Rev12.3: Eliminates 0%→5% jump at MacroScore≈0.70, reduces noise-driven toggling, improves soft-rebalancing compatibility."
   },
 
   "cma": {
