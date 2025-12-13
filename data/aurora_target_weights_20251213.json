@@ -1,10 +1,10 @@
 {
   "date": "20251213",
   "meta": {
-    "engine_version": "AURORA-Rev12.1b",
-    "git_commit": "d4f6e662329fc3ee983a235c3a98e70483f2e256",
-    "run_id": "20189470360",
-    "timestamp_utc": "2025-12-13T08:29:34.612375+00:00"
+    "engine_version": "AURORA-Rev12.3-final (Core) + CMA Overlay",
+    "git_commit": "b48d9c9bd27807e901a550a438484608b98c115d",
+    "run_id": "20193142796",
+    "timestamp_utc": "2025-12-13T14:06:18.370831+00:00"
   },
   "signals": {
     "fx_rate": 1477.300048828125,
