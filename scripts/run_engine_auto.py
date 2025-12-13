@@ -151,6 +151,27 @@ def compute_drawdown_from_series(prices: list[float]) -> float:
     return np.min(drawdown)
 
 
+def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
+    """
+    매크로 스코어를 계산합니다.
+    - PMI: 45 이상이면 긍정적, 45 미만이면 부정적
+    - CPI YoY: 2~8% 사이가 긍정적
+    - Unemployment: 3~5% 사이가 긍정적
+    """
+    # PMI 계산
+    pmi_score = 1 if pmi >= 45 else 0
+
+    # CPI YoY 계산
+    cpi_score = 1 if 2 <= cpi_yoy <= 8 else 0
+
+    # Unemployment 계산
+    unemployment_score = 1 if 3 <= unemployment <= 5 else 0
+
+    # 매크로 스코어는 세 가지 지표의 평균값
+    macro_score = (pmi_score + cpi_score + unemployment_score) / 3.0
+    return macro_score
+
+
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     """
     마켓 데이터를 처리하고, 각종 신호를 계산합니다.
