@@ -131,6 +131,34 @@ def _normalize_macro_pct(x: float, name: str) -> float:
     return x
 
 
+def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    마켓 데이터를 처리하고, 각종 신호를 계산합니다.
+    market: 로드된 마켓 데이터 (예: 가격, 변동성, 기타 지표 등)
+    """
+    signals = {}
+
+    # 예시: FXW (환율에 기반한 신호 계산)
+    signals['fxw'] = market.get('fxw', 0.0)  # 'fxw'는 마켓 데이터에 있는 값
+
+    # 예시: VIX (변동성 신호)
+    signals['vix'] = market.get('vix', 0.0)
+
+    # 예시: Drawdown (최대 낙폭 신호)
+    signals['drawdown'] = market.get('drawdown', 0.0)
+
+    # 예시: ML_Risk (머신러닝 리스크 지표)
+    signals['ml_risk'] = market.get('ml_risk', 0.0)
+
+    # 예시: 다른 신호들 (필요한 만큼 추가)
+    signals['macro_score'] = market.get('macro_score', 0.0)
+    signals['systemic_bucket'] = market.get('systemic_bucket', 'C0')
+
+    # 필요에 따라 추가적인 신호 계산 로직을 작성할 수 있습니다.
+
+    return signals
+
+
 def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
     """
     자산군에 대한 알파를 계산합니다.
@@ -272,6 +300,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         weights = {k: v * scale for k, v in weights.items()}
 
     return weights
+
 
 
 def load_latest_market() -> Dict[str, Any]:
