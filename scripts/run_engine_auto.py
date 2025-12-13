@@ -101,25 +101,120 @@ def _normalize_macro_pct(x: float, name: str) -> float:
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     """
     마켓 데이터를 처리하고, 각종 신호를 계산합니다.
-    Rev12.4 추가: yc_spread (10Y - 2Y) 계산
+    FXW는 엔진에서 직접 계산 (market에 없음)
     """
-    signals = {}
-    signals['fxw'] = market['fxw']
-    signals['vix'] = market['vix']
-    signals['drawdown'] = market['drawdown']
-    signals['ml_risk'] = market['ml_risk']
-    signals['macro_score'] = market['macro_score']
-    signals['systemic_bucket'] = market['systemic_bucket']
-    signals['fx_rate'] = market['fx']['usdkrw']
-    signals['ffr_upper'] = market['rates']['ffr_upper']
-    signals['ml_opp'] = market['ml_opp']
-    # Rev12.4 추가: Yield Curve Spread (10Y - 2Y bps)
-    dgs10 = market['rates']['dgs10']
-    dgs2 = market['rates']['dgs2']
-    signals['yc_spread'] = (dgs10 - dgs2) * 100
-    # CMA용 hy_oas
-    signals['hy_oas'] = market['risk']['hy_oas']
-    return signals
+    fx_block = market["fx"]
+    spx_block = market["spx"]
+    risk = market["risk"]
+    rates = market["rates"]
+    macro = market["macro"]
+
+    fx_rate = float(fx_block["usdkrw"])
+
+    # FX Vol (21D)
+    fx_hist_21d = fx_block.get("usdkrw_history_21d", [])
+    fx_vol = compute_fx_vol(fx_hist_21d)
+
+    vix = float(risk["vix"])
+    hy_oas = float(risk["hy_oas"])
+
+    dgs2 = float(rates["dgs2"])
+    dgs10 = float(rates["dgs10"])
+    ffr_upper = float(rates["ffr_upper"])
+
+    yc_spread_bps = (dgs10 - dgs2) * 100.0
+    _assert_range("YieldCurveSpread(bps)", yc_spread_bps, -300.0, 300.0)
+
+    pmi = float(macro["pmi_markit"])
+    cpi_yoy = float(macro["cpi_yoy"])
+    unemployment = float(macro["unemployment"])
+
+    closes_3y = spx_block.get("closes_3y_1095", [])
+    drawdown = compute_drawdown_from_series(closes_3y)
+
+    closes_10y = spx_block.get("closes_10y")
+    if isinstance(closes_10y, list) and len(closes_10y) >= 200:
+        dd_10y = compute_drawdown_from_series([float(x) for x in closes_10y])
+    else:
+        dd_10y = float(drawdown)
+
+    # FXW 계산 (엔진에서 직접 계산)
+    fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
+    if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
+        _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
+    fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
+    if len(fx_hist_130d) < 130:
+        _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
+
+    # AuroraX121 엔진을 사용하여 FXW 계산
+    try:
+        engine = AuroraX121()
+        for px in fx_hist_130d:
+            engine.kde.add(float(px))
+        fxw = engine.kde.fxw(fx_rate)
+
+        # fxw를 market 데이터에 추가 (디버깅)
+        print(f"[DEBUG] Calculated fxw: {fxw}")
+        market["fxw"] = fxw  # fxw를 market에 추가
+        print(f"[DEBUG] Market after adding fxw: {market['fxw']}")
+    except Exception as e:
+        _fail(f"Error calculating fxw: {e}")
+
+    fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
+
+    macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
+
+    ml_risk = compute_ml_risk(
+        vix=vix,
+        hy_oas=hy_oas,
+        fxw=fxw,
+        drawdown=drawdown,
+        yc_spread=yc_spread_bps,
+    )
+
+    ml_opp = compute_ml_opp(
+        vix=vix,
+        hy_oas=hy_oas,
+        fxw=fxw,
+        drawdown=drawdown,
+    )
+
+    ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
+
+    systemic_level = compute_systemic_level(
+        hy_oas=hy_oas,
+        yc_spread=yc_spread_bps,
+        macro_score=macro_score,
+        ml_regime=ml_regime,
+        drawdown=drawdown,
+    )
+
+    systemic_bucket = determine_systemic_bucket(systemic_level)
+
+    return {
+        "fx_rate": fx_rate,
+        "fxw": fxw,  # fxw 포함
+        "fx_kde": fx_kde,
+        "fx_vol": fx_vol,
+        "vix": vix,
+        "hy_oas": hy_oas,
+        "drawdown": drawdown,
+        "dd_10y": dd_10y,
+        "dgs2": dgs2,
+        "dgs10": dgs10,
+        "yc_spread_bps": yc_spread_bps,
+        "ffr_upper": ffr_upper,
+        "pmi": pmi,
+        "cpi_yoy": cpi_yoy,
+        "unemployment": unemployment,
+        "macro_score": macro_score,
+        "ml_risk": ml_risk,
+        "ml_opp": ml_opp,
+        "ml_regime": ml_regime,
+        "systemic_level": systemic_level,
+        "systemic_bucket": systemic_bucket,
+    }
+
 
 def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
     """
