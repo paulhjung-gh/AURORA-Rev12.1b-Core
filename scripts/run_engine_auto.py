@@ -324,7 +324,26 @@ def write_daily_report(
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[REPORT] Daily report written to: {out_path}")
+    
+def determine_state_from_signals(sig: Dict[str, float]) -> str:
+        """
+        엔진 상태 결정 함수 (테스트용 + 실전용)
+        - 간단하게 Systemic과 ML_Risk 기준으로 상태 반환
+        - 필요 시 나중에 더 세밀하게 확장 가능
+        """
+        ml_risk = sig.get("ml_risk", 0.5)
+        systemic = sig.get("systemic_bucket", "C0")
 
+        if systemic == "C3" or ml_risk > 0.85:
+            return "S3_HARD"
+        if systemic == "C2" or ml_risk > 0.75:
+            return "S3_SOFT"
+        if sig.get("vix", 0) > 35:
+            return "S2_HIGH_VOL"
+        if ml_risk > 0.65:
+            return "S1_MILD"
+        return "S0_NORMAL"
+    
 def main():
     market = load_latest_market()
     sig = build_signals(market)
