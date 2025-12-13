@@ -431,17 +431,17 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     
     try:
         tas_output = plan_cma_action(
-            today_str,
-            deployed_krw,
-            cash_krw,
-            ref_base_krw,
-            sig["fxw"],
-            long_term_dd,
-            final_state_name,        # 누락된 인자 추가
-            cma_state,               # prev_cma_state로 전체 cma_state 전달
-            long_term_dd,
-            ml_risk,
-            systemic_bucket
+            today_str,               # 1
+            deployed_krw,            # 2
+            cash_krw,                # 3
+            ref_base_krw,            # 4
+            sig["fxw"],              # 5
+            long_term_dd,            # 6
+            final_state_name,        # 7 - 누락된 인자 추가
+            cma_state,               # 8 - prev_cma_state로 전체 cma_state 전달
+            long_term_dd,            # 9
+            ml_risk,                 # 10
+            systemic_bucket          # 11
         )
     except Exception as e:
         _fail(f"Error in plan_cma_action: {e}")
@@ -452,8 +452,8 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     return {
         "cma_snapshot": {
             "ref_base_krw": ref_base_krw,
-            "s0_count": cma_state['cma_balance'].get('s0_count', 0),
-            "last_s0_yyyymm": cma_state['cma_balance'].get('last_s0_yyyymm', "202512"),
+            "s0_count": cma_balance.get('s0_count', 0),
+            "last_s0_yyyymm": cma_balance.get('last_s0_yyyymm', "202512"),
             "total_cma_krw": deployed_krw + cash_krw,
         },
         "tas": {
