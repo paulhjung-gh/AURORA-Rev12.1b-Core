@@ -1,10 +1,10 @@
-# AURORA Rev12.2 Daily Report
+# AURORA Rev13.0 Daily Report
 
 - Report Date: 2025-12-13
-- Engine Version: AURORA Rev12.2
-- Git Commit: 74db6f5c20f10de5c85b2f426d8352af01958f32
-- Run ID: 20197221887
-- Timestamp(UTC): 2025-12-13T20:09:48.608929+00:00
+- Engine Version: AURORA Rev13.0
+- Git Commit: b45cc51820bebc01cc90eead551219bb1a2d2c15
+- Run ID: 20197251597
+- Timestamp(UTC): 2025-12-13T20:12:24.955865+00:00
 
 ## 1. Market Data Summary (FD inputs)
 - USD/KRW (Sell Rate): 1477.30
