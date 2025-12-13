@@ -1,10 +1,10 @@
-# AURORA Daily Report
+# AURORA Rev12.2 Daily Report
 
 - Report Date: 2025-12-13
-- Engine Version: AURORA-Rev13.0-final (Core) + CMA Overlay
-- Git Commit: 142a6cd92f071bb40fcbce5264bb2d64611c0e9d
-- Run ID: 20193532845
-- Timestamp(UTC): 2025-12-13T14:38:23.142665+00:00
+- Engine Version: AURORA Rev12.2
+- Git Commit: 74db6f5c20f10de5c85b2f426d8352af01958f32
+- Run ID: 20197221887
+- Timestamp(UTC): 2025-12-13T20:09:48.608929+00:00
 
 ## 1. Market Data Summary (FD inputs)
 - USD/KRW (Sell Rate): 1477.30
@@ -17,23 +17,23 @@
 
 | Asset   | Weight (%) |
 |---------|-----------:|
-| SPX     |      29.12 |
-| NDX     |      13.59 |
-| DIV     |      12.76 |
+| SPX     |      29.42 |
+| NDX     |      13.73 |
+| DIV     |      12.89 |
 | EM      |       6.00 |
 | ENERGY  |       3.00 |
 | DURATION |       0.00 |
-| SGOV    |      30.54 |
+| SGOV    |      29.96 |
 | GOLD    |       5.00 |
 | **Total** | **    100.00** |
 
 ## 3. Signals (FD / ML / Systemic)
-- FXW (KDE): 0.289
+- FXW (KDE): 0.337
 - FX Vol (21D σ): 0.0045
 - SPX 3Y Drawdown: -1.07%
 - MacroScore: 0.610
-- ML_Risk / ML_Opp / ML_Regime: 0.197 / 0.315 / 0.416
-- Systemic Level / Bucket: 0.186 / C0
+- ML_Risk / ML_Opp / ML_Regime: 0.187 / 0.335 / 0.408
+- Systemic Level / Bucket: 0.185 / C0
 - Yield Curve Spread (10Y-2Y bps): 62.0
 
 ### FXW Anchor Distribution (USD/KRW, 130D KDE)
