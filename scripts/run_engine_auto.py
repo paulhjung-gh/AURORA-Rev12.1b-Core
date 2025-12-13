@@ -410,7 +410,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     else:
         dd_10y = float(drawdown)
 
-    # FXW 계산 (엔진에서 직접)
+    # FXW 계산 (엔진에서 직접 계산)
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
@@ -419,13 +419,16 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
 
     # AuroraX121 엔진을 사용하여 FXW 계산
-    engine = AuroraX121()
-    for px in fx_hist_130d:
-        engine.kde.add(float(px))
-    fxw = engine.kde.fxw(fx_rate)
+    try:
+        engine = AuroraX121()
+        for px in fx_hist_130d:
+            engine.kde.add(float(px))
+        fxw = engine.kde.fxw(fx_rate)
 
-    # `fxw`를 market 데이터에 추가
-    market["fxw"] = fxw  # fxw를 market에 추가
+        # `fxw`를 market 데이터에 추가
+        market["fxw"] = fxw  # fxw를 market에 추가
+    except Exception as e:
+        _fail(f"Error calculating fxw: {e}")
 
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
