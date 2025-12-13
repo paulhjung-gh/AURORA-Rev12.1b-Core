@@ -98,6 +98,28 @@ def _normalize_macro_pct(x: float, name: str) -> float:
         print(f"[UNIT] {name} normalized: fraction->pct ({old} -> {x})")
     return x
 
+def compute_fx_kde_anchor_and_stats(fx_hist_130d: list) -> Dict[str, Any]:
+    """
+    130일간의 FX 데이터를 기반으로 KDE 계산 및 통계 정보 반환
+    """
+    fx_hist_130d = np.array(fx_hist_130d)
+    
+    # KDE 계산
+    kde = gaussian_kde(fx_hist_130d)
+    
+    # 커널 밀도 추정에 대한 여러 통계 정보
+    kde_anchor = kde.dataset.mean()  # 평균
+    kde_bandwidth = kde.factor  # 커널 밴드폭
+    kde_values = kde.evaluate(fx_hist_130d)  # 각 값에 대한 밀도 추정 값
+    
+    stats = {
+        "kde_anchor": kde_anchor,
+        "kde_bandwidth": kde_bandwidth,
+        "kde_values": kde_values
+    }
+    
+    return stats
+    
 def compute_fx_vol(fx_hist: list[float]) -> float:
     """
     21일간의 FX 변동성을 계산하는 함수입니다.
