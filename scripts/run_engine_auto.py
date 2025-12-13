@@ -565,13 +565,16 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
 
     today_str = datetime.now().strftime("%Y%m")
 
+    # `final_state_name`을 동적으로 계산
+    final_state_name = determine_final_state_name(sig)
+
     # 누락된 인자 추가
     long_term_dd = sig.get('drawdown', 0.0)
     ml_risk = sig.get('ml_risk', 0.0)
     systemic_bucket = sig.get('systemic_bucket', 'C0')
-    final_state_name = "S0_NORMAL"  # 예시로 "S0_NORMAL"을 사용, 필요에 따라 동적으로 설정
     prev_cma_state = cma_state  # 이전 CMA 상태를 전달
 
+    # plan_cma_action 호출 시 누락된 인자들 추가
     tas_output = plan_cma_action(
         today_str,
         deployed_krw,
@@ -579,11 +582,11 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
         cma_state['cma_balance']['ref_base_krw'],
         sig["fxw"],
         abs(sig["drawdown"]),
-        final_state_name,
-        prev_cma_state,  # 필수 인자 추가
-        long_term_dd,    # 필수 인자 추가
-        ml_risk,         # 필수 인자 추가
-        systemic_bucket  # 필수 인자 추가
+        final_state_name,        # final_state_name 추가
+        prev_cma_state,          # prev_cma_state 추가
+        long_term_dd,            # long_term_dd 추가
+        ml_risk,                 # ml_risk 추가
+        systemic_bucket          # systemic_bucket 추가
     )
 
     exec_delta = tas_output.suggested_exec_krw(cma_state['cma_balance']['cash_krw'])
