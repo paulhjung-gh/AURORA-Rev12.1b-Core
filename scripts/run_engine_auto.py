@@ -612,7 +612,6 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     }
 
 
-
 def main():
     market = load_latest_market()
     sig = build_signals(market)
