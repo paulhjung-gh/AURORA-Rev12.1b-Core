@@ -44,7 +44,6 @@ MONTHLY_TOTAL_KRW = MONTHLY_ISA_KRW + MONTHLY_DIRECT_KRW  # 4,000,000
 MONTHLY_GOLD_ISA_KRW = 100_000
 MONTHLY_GOLD_DIRECT_KRW = 100_000
 MONTHLY_GOLD_TOTAL_KRW = MONTHLY_GOLD_ISA_KRW + MONTHLY_GOLD_DIRECT_KRW  # 200,000
-# Gold sleeve weight = 200k / 4,000k = 5%
 GOLD_SLEEVE_WEIGHT = MONTHLY_GOLD_TOTAL_KRW / MONTHLY_TOTAL_KRW  # 0.05
 
 def _fail(msg: str) -> None:
@@ -105,21 +104,21 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     Rev12.4 추가: yc_spread (10Y - 2Y) 계산
     """
     signals = {}
-    signals['fxw'] = market.get('fxw', 0.0)
-    signals['vix'] = market.get('vix', 0.0)
-    signals['drawdown'] = market.get('drawdown', 0.0)
-    signals['ml_risk'] = market.get('ml_risk', 0.0)
-    signals['macro_score'] = market.get('macro_score', 0.0)
-    signals['systemic_bucket'] = market.get('systemic_bucket', 'C0')
+    signals['fxw'] = market['fxw']
+    signals['vix'] = market['vix']
+    signals['drawdown'] = market['drawdown']
+    signals['ml_risk'] = market['ml_risk']
+    signals['macro_score'] = market['macro_score']
+    signals['systemic_bucket'] = market['systemic_bucket']
     signals['fx_rate'] = market['fx']['usdkrw']
     signals['ffr_upper'] = market['rates']['ffr_upper']
-    signals['ml_opp'] = market.get('ml_opp', 0.5)
-
+    signals['ml_opp'] = market['ml_opp']
     # Rev12.4 추가: Yield Curve Spread (10Y - 2Y bps)
-    dgs10 = market['rates'].get('dgs10', 0.0)
-    dgs2 = market['rates'].get('dgs2', 0.0)
-    signals['yc_spread'] = (dgs10 - dgs2) * 100  # bps 단위
-
+    dgs10 = market['rates']['dgs10']
+    dgs2 = market['rates']['dgs2']
+    signals['yc_spread'] = (dgs10 - dgs2) * 100
+    # CMA용 hy_oas
+    signals['hy_oas'] = market['risk']['hy_oas']
     return signals
 
 def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
@@ -127,7 +126,6 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
     자산군에 대한 알파를 계산합니다 (Rev12.4)
     """
     alpha = 0.0
-
     vix = signals["vix"]
     if vix >= 30:
         vix_alpha = -0.05
@@ -135,7 +133,6 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
         vix_alpha = 0.05
     else:
         vix_alpha = 0.0
-
     drawdown = signals["drawdown"]
     if drawdown <= -0.3:
         dd_alpha = -0.05
@@ -143,7 +140,6 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
         dd_alpha = 0.05
     else:
         dd_alpha = 0.0
-
     fxw = signals["fxw"]
     if fxw < 0.3:
         fxw_alpha = -0.05
@@ -151,7 +147,6 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
         fxw_alpha = 0.05
     else:
         fxw_alpha = 0.0
-
     ml_risk = signals["ml_risk"]
     if ml_risk >= 0.75:
         ml_alpha = -0.05
@@ -159,7 +154,6 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
         ml_alpha = 0.05
     else:
         ml_alpha = 0.0
-
     systemic_bucket = signals["systemic_bucket"]
     if systemic_bucket in ["C2", "C3"]:
         sys_alpha = -0.05
@@ -167,14 +161,12 @@ def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
         sys_alpha = 0.05
     else:
         sys_alpha = 0.0
-
     if asset == "SPX":
         alpha = vix_alpha + dd_alpha + fxw_alpha + ml_alpha + sys_alpha
     elif asset == "NDX":
         alpha = (vix_alpha * 1.5) + (dd_alpha * 1.2) + (fxw_alpha * 1.3) + (ml_alpha * 1.4) + (sys_alpha * 1.2)
     elif asset == "DIV":
         alpha = (vix_alpha * 0.5) + (dd_alpha * 0.8) + (fxw_alpha * 0.7) + (ml_alpha * 0.6) + (sys_alpha * 0.5)
-
     alpha = max(-0.1, min(alpha, 0.1))
     return alpha
 
@@ -190,10 +182,8 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     ml_opp = sig["ml_opp"]
     macro_score = sig["macro_score"]
     systemic_bucket = sig["systemic_bucket"]
-
     gold_w = float(GOLD_SLEEVE_WEIGHT)
     remaining = 1.0 - gold_w
-
     sgov_floor = eng.sgov_floor(
         fxw=fxw,
         fx_rate=fx_rate,
@@ -211,38 +201,28 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         fxw=fxw,
         ml_risk=ml_risk,
     )
-
     sgov_floor = max(0.0, min(GOV_MAX_SGOV, sgov_floor))
     sat_weight = max(0.0, min(GOV_MAX_SAT, sat_weight))
     dur_weight = max(0.0, min(GOV_MAX_DUR, dur_weight))
-
     tri_sum = sgov_floor + sat_weight + dur_weight
     if tri_sum > remaining and tri_sum > 0:
         scale = remaining / tri_sum
         sgov_floor *= scale
         sat_weight *= scale
         dur_weight *= scale
-
     core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
-
-    # Rev12.4 Core tilt 적용
     alpha_spx = calculate_alpha("SPX", sig)
     alpha_ndx = calculate_alpha("NDX", sig)
     alpha_div = calculate_alpha("DIV", sig)
-
     core_base = {
         "SPX": 0.525 + alpha_spx,
         "NDX": 0.245 + alpha_ndx,
         "DIV": 0.230 + alpha_div,
     }
-
-    # Core 내부 normalize (총합 1 보장)
     core_sum = sum(core_base.values())
     core_alloc = {k: v / core_sum for k, v in core_base.items()}
-
     em_w = sat_weight * (2.0 / 3.0)
     en_w = sat_weight * (1.0 / 3.0)
-
     weights = {
         "SPX": core_alloc["SPX"] * core_weight,
         "NDX": core_alloc["NDX"] * core_weight,
@@ -253,12 +233,10 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         "SGOV": sgov_floor,
         "GOLD": gold_w,
     }
-
     total = sum(weights.values())
     if total > 0:
         scale = 1.0 / total
         weights = {k: v * scale for k, v in weights.items()}
-
     return weights
 
 def load_latest_market() -> Dict[str, Any]:
@@ -293,12 +271,9 @@ def write_daily_report(
     lines.append(f"- Timestamp(UTC): {meta.get('timestamp_utc')}")
     lines.append("")
     lines.append("## 1. Market Data Summary (FD inputs)")
-    if sig.get("fx_rate"):
-        lines.append(f"- USD/KRW (Sell Rate): {sig['fx_rate']:.2f}")
-    if sig.get("vix"):
-        lines.append(f"- VIX: {sig['vix']:.2f}")
-    if sig.get("hy_oas"):
-        lines.append(f"- HY OAS: {sig['hy_oas']:.2f} bps")
+    lines.append(f"- USD/KRW (Sell Rate): {sig['fx_rate']:.2f}")
+    lines.append(f"- VIX: {sig['vix']:.2f}")
+    lines.append(f"- HY OAS: {sig['hy_oas']:.2f} bps")
     lines.append("")
     lines.append("## 2. CMA State and Overlay")
     lines.append(f"- Ref Base KRW: {cma_overlay['cma_snapshot']['ref_base_krw']}")
@@ -321,42 +296,36 @@ def write_daily_report(
     lines.append("## 4. CMA Overlay Allocation")
     for key, value in cma_overlay['risk_on_target_weights'].items():
         lines.append(f"- {key}: {value*100:.2f}%")
-
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[REPORT] Daily report written to: {out_path}")
 
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
-    """
-    엔진 상태 결정 함수
-    """
-    ml_risk = sig.get("ml_risk", 0.5)
-    systemic = sig.get("systemic_bucket", "C0")
-
+    ml_risk = sig["ml_risk"]
+    systemic = sig["systemic_bucket"]
     if systemic == "C3" or ml_risk > 0.85:
         return "S3_HARD"
     if systemic == "C2" or ml_risk > 0.75:
         return "S3_SOFT"
-    if sig.get("vix", 0) > 35:
+    if sig["vix"] > 35:
         return "S2_HIGH_VOL"
     if ml_risk > 0.65:
         return "S1_MILD"
     return "S0_NORMAL"
 
-def compute_cma_overlay_section(
-    sig: Dict[str, float],
-    weights: Dict[str, float]
-) -> Dict[str, Any]:
-    """
-    실제 CMA Overlay 계산 (cma_overlay.py 함수들 활용)
-    """
+def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
     cma_state = load_cma_state()
 
+    today_str = datetime.now().strftime("%Y%m")
+
     tas_output = plan_cma_action(
-        vix=sig.get("vix", 15.0),
-        long_term_dd_10y=sig.get("drawdown", 0.0),
-        hy_oas=sig.get("hy_oas", 300.0),
-        ml_risk=sig.get("ml_risk", 0.5),
-        systemic_bucket=sig.get("systemic_bucket", "C0"),
+        today_str,
+        cma_state.deployed_krw,
+        cma_state.cash_krw,
+        cma_state.ref_base_krw,
+        sig["fxw"],
+        abs(sig["drawdown"]),
+        "S0_NORMAL",
+        cma_state,
     )
 
     exec_delta = tas_output.suggested_exec_krw(cma_state.cash_krw)
@@ -381,13 +350,12 @@ def compute_cma_overlay_section(
         "risk_on_target_weights": risk_on_alloc,
     }
 
-
 def main():
     market = load_latest_market()
     sig = build_signals(market)
     weights = compute_portfolio_target(sig)
-    state_name = determine_state_from_signals(sig)  # 기존 함수 가정
-    cma_overlay = compute_cma_overlay_section(sig, weights)  # 기존 함수 가정
+    state_name = determine_state_from_signals(sig)
+    cma_overlay = compute_cma_overlay_section(sig, weights)
 
     print("[INFO] ==== 3. FD / ML / Systemic Signals ====")
     print(f"FXW (KDE): {sig['fxw']:.3f}")
@@ -396,7 +364,7 @@ def main():
     print(f"MacroScore: {sig['macro_score']:.3f}")
     print(f"ML_Risk / ML_Opp / ML_Regime: {sig['ml_risk']:.3f} / {sig['ml_opp']:.3f} / {sig.get('ml_regime', 0.5):.3f}")
     print(f"Systemic Level / Bucket: {sig['systemic_level']:.3f} / {sig['systemic_bucket']}")
-    print(f"Yield Curve Spread (10Y-2Y bps): {sig.get('yc_spread', 0.0):.1f}")
+    print(f"Yield Curve Spread (10Y-2Y bps): {sig['yc_spread']:.1f}")
 
     print("[INFO] ==== 4. Engine State ====")
     print(f"Final State: {state_name}")
