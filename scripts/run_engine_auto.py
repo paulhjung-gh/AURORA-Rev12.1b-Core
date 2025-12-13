@@ -98,6 +98,22 @@ def _normalize_macro_pct(x: float, name: str) -> float:
         print(f"[UNIT] {name} normalized: fraction->pct ({old} -> {x})")
     return x
 
+def compute_fx_vol(fx_hist: list[float]) -> float:
+    """
+    21일간의 FX 변동성을 계산하는 함수입니다.
+    21일 변동성을 **로그 수익률**의 표준편차로 계산합니다.
+    """
+    if len(fx_hist) < 22:
+        return 0.0
+    arr = np.array(fx_hist[-22:], dtype=float)
+    arr = arr[arr > 0]
+    if len(arr) < 22:
+        return 0.0
+    logret = np.diff(np.log(arr))
+    sigma = float(np.std(logret))
+    return float(np.clip(sigma, 0.0, 0.05))
+
+
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     """
     마켓 데이터를 처리하고, 각종 신호를 계산합니다.
