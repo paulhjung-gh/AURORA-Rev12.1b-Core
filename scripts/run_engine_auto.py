@@ -114,6 +114,19 @@ def compute_fx_vol(fx_hist: list[float]) -> float:
     return float(np.clip(sigma, 0.0, 0.05))
 
 
+import numpy as np
+
+def compute_drawdown_from_series(prices: list[float]) -> float:
+    """
+    주어진 가격 시계열에 대한 드로우다운을 계산합니다.
+    드로우다운은 최고점 대비 최저점의 비율로 계산됩니다.
+    """
+    prices = np.array(prices)
+    peak = np.maximum.accumulate(prices)
+    drawdown = (prices - peak) / peak
+    return np.min(drawdown)
+
+
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     """
     마켓 데이터를 처리하고, 각종 신호를 계산합니다.
