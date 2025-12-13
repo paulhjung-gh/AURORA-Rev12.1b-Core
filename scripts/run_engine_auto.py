@@ -603,14 +603,16 @@ def _find_latest_cma_state_file() -> Path | None:
 
 def fx_scale_from_fxw(fxw: float) -> float:
     """
-    FXW 값에 따라 FX 스케일을 계산하는 함수
+    FXW 값에 따라 FX 스케일을 계산하는 함수.
+    예시로 들어둔 값은 나중에 실제 로직에 맞게 수정해야 합니다.
     """
+    # FXW가 0~1 사이의 값을 가지므로, 예를 들어 fxw에 맞춰서 적절한 스케일을 계산하는 방식으로 바꿔야 함
     if fxw <= 0.2:
-        return 0.5  # 예시값, FXW가 낮을 때 스케일링
+        return 0.5  # FXW가 낮을 때 스케일링 비율
     elif fxw <= 0.5:
-        return 0.75  # 예시값, FXW가 중간일 때 스케일링
+        return 0.75  # FXW가 중간일 때 스케일링 비율
     else:
-        return 1.0  # 예시값, FXW가 높을 때 스케일링
+        return 1.0  # FXW가 높은 경우 스케일링 비율
 
 def compute_cma_overlay_section(
     sig: Dict[str, float],
