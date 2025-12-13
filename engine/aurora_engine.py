@@ -46,7 +46,7 @@ class Signals:
     ml_regime: float = 0.5
     macro_score: float = 0.5
     ffr_upper: float = 5.0
-    yc_spread: float = 0.0  # 10Y - 2Y 추가 (Rev12.4 필요)
+    yc_spread: float = 0.0  # 10Y - 2Y bps (inversion 시 음수)
 
 @dataclass
 class Portfolio:
@@ -184,35 +184,32 @@ class AuroraX121:
             return ReversionMode.MONDAY_ONLY
         return ReversionMode.FULL
 
-    # ==================== Rev12.4 추가: Core Internal Continuous Tilt ====================
+    # ==================== Rev12.4 Core Internal Continuous Tilt ====================
     def _core_tilt_alpha(self, signals: Signals) -> Dict[str, float]:
         """
         Core 내부 연속형 tilt 계산 (Rev12.4)
-        - YC inversion 강할수록 DIV +α / NDX -α
-        - ML_Risk 높을수록 DIV +α
-        - VIX 높을수록 DIV +α
+        - 주요 신호: YC inversion, ML_Risk, VIX
         - sigmoid로 부드러운 반응
         - 총합 α = 0 보장
         """
         def sigmoid(z: float, k: float = 12.0) -> float:
             return 1.0 / (1.0 + math.exp(-k * z))
 
-        # 1. Yield Curve inversion (10Y-2Y < 0 일수록 inversion 강함)
-        yc_inv = max(0.0, -signals.yc_spread / 100)  # bps 단위 가정, inversion 강도 0~1+
-        yc_alpha = 0.06 * sigmoid(yc_inv - 0.5)  # inversion 강할수록 +α
+        # 1. Yield Curve inversion (강할수록 DIV +α / NDX -α)
+        yc_inv = max(0.0, -signals.yc_spread / 100)  # inversion 강도 (bps 기준)
+        yc_alpha = 0.06 * sigmoid(yc_inv - 0.3)
 
-        # 2. ML_Risk 높을수록 DIV 방어 tilt
+        # 2. ML_Risk 높을수록 DIV +α
         ml_alpha = 0.05 * sigmoid(signals.ml_risk - 0.60)
 
-        # 3. VIX 높을수록 DIV 방어 tilt
+        # 3. VIX 높을수록 DIV +α
         vix_alpha = 0.04 * sigmoid((signals.vix - 20) / 10)
 
         total_positive = yc_alpha + ml_alpha + vix_alpha
 
-        # SPX는 중립 buffer, NDX는 성장주라 -α 강하게
-        alpha_spx = 0.0
-        alpha_ndx = -total_positive * 1.2
-        alpha_div = total_positive * 1.8  # DIV에 강하게 집중
+        alpha_spx = 0.0  # SPX는 중립 buffer
+        alpha_ndx = -total_positive * 1.2  # 성장주라 -α 강하게
+        alpha_div = total_positive * 1.8   # 배당주라 +α 강하게
 
         # 최대 ±8% 제한
         alpha_spx = max(-0.08, min(0.08, alpha_spx))
@@ -222,18 +219,20 @@ class AuroraX121:
         # Σα = 0 강제 보정
         sum_alpha = alpha_spx + alpha_ndx + alpha_div
         if abs(sum_alpha) > 1e-6:
-            alpha_spx -= sum_alpha / 3
-            alpha_ndx -= sum_alpha / 3
-            alpha_div -= sum_alpha / 3
+            correction = sum_alpha / 3
+            alpha_spx -= correction
+            alpha_ndx -= correction
+            alpha_div -= correction
 
         return {"SPX": alpha_spx, "NDX": alpha_ndx, "DIV": alpha_div}
 
     def compute_portfolio_target(self, signals: Signals) -> Dict[str, float]:
         """
-        Rev12.4: Core 내부 tilt 적용 버전
+        Rev12.4: Core 내부 tilt 적용
         """
         fxw = self.fxw(signals.fx)
         systemic_bucket = self.systemic(signals.systemic_level)
+
         sgov_floor = self.sgov_floor(
             fxw=fxw,
             fx_rate=signals.fx,
@@ -252,6 +251,9 @@ class AuroraX121:
             ml_risk=signals.ml_risk,
         )
 
+        gold_w = 0.05
+        remaining_for_core = 1.0 - gold_w - sgov_floor - sat_weight - dur_weight
+
         # Rev12.4 Core tilt 적용
         tilt = self._core_tilt_alpha(signals)
 
@@ -267,12 +269,11 @@ class AuroraX121:
 
         em_w = sat_weight * (2.0 / 3.0)
         en_w = sat_weight * (1.0 / 3.0)
-        gold_w = 0.05
 
         weights = {
-            "SPX": core_alloc["SPX"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
-            "NDX": core_alloc["NDX"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
-            "DIV": core_alloc["DIV"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
+            "SPX": core_alloc["SPX"] * remaining_for_core,
+            "NDX": core_alloc["NDX"] * remaining_for_core,
+            "DIV": core_alloc["DIV"] * remaining_for_core,
             "EM": em_w,
             "ENERGY": en_w,
             "DURATION": dur_weight,
