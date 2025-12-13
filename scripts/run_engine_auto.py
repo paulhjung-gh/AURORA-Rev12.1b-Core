@@ -380,6 +380,11 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
 
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    마켓 데이터를 처리하고, 각종 신호를 계산합니다.
+    Rev12.4 추가: yc_spread (10Y - 2Y) 계산
+    FXW는 엔진에서 직접 계산 (market에 없음)
+    """
     fx_block = market["fx"]
     spx_block = market["spx"]
     risk = market["risk"]
@@ -421,7 +426,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
 
-    # ensure last 130 only (P0-2 core)
     fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
     if len(fx_hist_130d) < 130:
         _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
@@ -435,7 +439,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     # KDE stats (debug/report)
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
-    # P0-2 fail-fast: anchor가 분포 극하단으로 튀면 입력 시계열이 잘못 들어온 것으로 간주
     anchor = float(fx_kde["anchor"])
     p05 = float(fx_kde["p05"])
     if anchor < (p05 - 10.0):
@@ -454,12 +457,14 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         drawdown=drawdown,
         yc_spread=yc_spread_bps,
     )
+
     ml_opp = compute_ml_opp(
         vix=vix,
         hy_oas=hy_oas,
         fxw=fxw,
         drawdown=drawdown,
     )
+
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
     systemic_level = compute_systemic_level(
@@ -469,6 +474,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         ml_regime=ml_regime,
         drawdown=drawdown,
     )
+
     systemic_bucket = determine_systemic_bucket(systemic_level)
 
     return {
