@@ -417,42 +417,49 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     cma_state = load_cma_state()
     if cma_state is None:
         _fail("CMA state is None. Please ensure the state is loaded correctly.")
+    
     cma_balance = cma_state.get('cma_balance', {})
     deployed_krw = cma_balance.get('deployed_krw', 0.0)
+    cash_krw = cma_balance.get('cash_krw', 0.0)
+    ref_base_krw = cma_balance.get('ref_base_krw', 0.0)
+    
     today_str = datetime.now().strftime("%Y%m")
     final_state_name = determine_final_state_name(sig)
-    long_term_dd = sig.get('drawdown', 0.0)
-    ml_risk = sig.get('ml_risk', 0.0)
-    systemic_bucket = sig.get('systemic_bucket', 'C0')
+    long_term_dd = abs(sig.get("drawdown", 0.0))
+    ml_risk = sig.get("ml_risk", 0.0)
+    systemic_bucket = sig.get("systemic_bucket", "C0")
+    
     try:
         tas_output = plan_cma_action(
             today_str,
             deployed_krw,
-            cma_state['cma_balance']['cash_krw'],
-            cma_state['cma_balance']['ref_base_krw'],
+            cash_krw,
+            ref_base_krw,
             sig["fxw"],
-            abs(sig["drawdown"]),
-            final_state_name,
-            cma_state,
+            long_term_dd,
+            final_state_name,        # 누락된 인자 추가
+            cma_state,               # prev_cma_state로 전체 cma_state 전달
             long_term_dd,
             ml_risk,
             systemic_bucket
         )
     except Exception as e:
         _fail(f"Error in plan_cma_action: {e}")
-    exec_delta = tas_output.suggested_exec_krw(cma_state['cma_balance']['cash_krw'])
+    
+    exec_delta = tas_output.suggested_exec_krw(cash_krw)
     risk_on_alloc = allocate_risk_on(exec_delta, weights)
+    
     return {
         "cma_snapshot": {
-            "ref_base_krw": cma_state['cma_balance']['ref_base_krw'],
-            "s0_count": cma_state['cma_balance']['s0_count'],
-            "last_s0_yyyymm": cma_state['cma_balance']['last_s0_yyyymm'],
-            "total_cma_krw": deployed_krw + cma_state['cma_balance']['cash_krw'],
+            "ref_base_krw": ref_base_krw,
+            "s0_count": cma_state['cma_balance'].get('s0_count', 0),
+            "last_s0_yyyymm": cma_state['cma_balance'].get('last_s0_yyyymm', "202512"),
+            "total_cma_krw": deployed_krw + cash_krw,
         },
         "tas": {
             "threshold": tas_output.final_threshold,
             "deploy_factor": tas_output.deploy_factor,
-            "target_deploy_krw": tas_output.deploy_factor * (deployed_krw + cma_state['cma_balance']['cash_krw']),
+            "target_deploy_krw": tas_output.deploy_factor * (deployed_krw + cash_krw),
         },
         "execution": {
             "suggested_exec_krw": exec_delta,
