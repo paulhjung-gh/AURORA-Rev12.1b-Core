@@ -556,6 +556,7 @@ def determine_final_state_name(sig: Dict[str, float]) -> str:
 def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
     cma_state = load_cma_state()
 
+    # cma_state가 None인 경우를 처리
     if cma_state is None:
         _fail("CMA state is None. Please ensure the state is loaded correctly.")
 
@@ -575,19 +576,22 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
     prev_cma_state = cma_state  # 이전 CMA 상태를 전달
 
     # plan_cma_action 호출 시 누락된 인자들 추가
-    tas_output = plan_cma_action(
-        today_str,
-        deployed_krw,
-        cma_state['cma_balance']['cash_krw'],
-        cma_state['cma_balance']['ref_base_krw'],
-        sig["fxw"],
-        abs(sig["drawdown"]),
-        final_state_name,        # final_state_name 추가
-        prev_cma_state,          # prev_cma_state 추가
-        long_term_dd,            # long_term_dd 추가
-        ml_risk,                 # ml_risk 추가
-        systemic_bucket          # systemic_bucket 추가
-    )
+    try:
+        tas_output = plan_cma_action(
+            today_str,
+            deployed_krw,
+            cma_state['cma_balance']['cash_krw'],
+            cma_state['cma_balance']['ref_base_krw'],
+            sig["fxw"],
+            abs(sig["drawdown"]),
+            final_state_name,        # final_state_name 추가
+            prev_cma_state,          # prev_cma_state 추가
+            long_term_dd,            # long_term_dd 추가
+            ml_risk,                 # ml_risk 추가
+            systemic_bucket          # systemic_bucket 추가
+        )
+    except Exception as e:
+        _fail(f"Error in plan_cma_action: {e}")
 
     exec_delta = tas_output.suggested_exec_krw(cma_state['cma_balance']['cash_krw'])
 
