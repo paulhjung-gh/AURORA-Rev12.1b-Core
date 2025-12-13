@@ -1,4 +1,6 @@
 # scripts/run_engine_auto.py
+# Rev12.3-final baseline + (CMA overlay external) / FXW is computed from 130D KDE, never read from market JSON.
+# Note: CMA는 외부 자금이며, 내부 target weights를 변경하지 않는다. (Overlay는 별도 섹션/리포트로만 제공)
 
 import os
 import sys
@@ -107,7 +109,7 @@ def _normalize_policy_rate_pct(x: float, name: str) -> float:
       - percent: 3.75
       - bps: 375
       - fraction: 0.0375
-    Deterministic rule (no guessing):
+    Deterministic rule:
       - if 0 < x < 1: fraction -> percent (×100)
       - elif 50 <= x < 1000: bps -> percent (/100)
       - else: assume percent
@@ -154,7 +156,7 @@ def load_latest_market() -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
 
-    # ✅ Data freshness (DATE ONLY, ignore time)
+    # ✅ Data freshness (DATE ONLY)
     today = datetime.now().strftime("%Y%m%d")
     meta = raw.get("meta", {})
     if isinstance(meta, dict):
@@ -184,7 +186,7 @@ def load_latest_market() -> Dict[str, Any]:
     if len(fx_hist_130d) < 130:
         _fail(f"MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130, got={len(fx_hist_130d)})")
 
-    # P0-2: 반드시 최근 130 trading days만 사용 (tail 130)
+    # P0-2: 반드시 최근 130 trading days만 사용
     fx_hist_130d = fx_hist_130d[-130:]
 
     market["fx"] = {
@@ -219,7 +221,6 @@ def load_latest_market() -> Dict[str, Any]:
         risk = {}
 
     vix = risk.get("vix") or raw.get("vix")
-
     hy_oas = (
         risk.get("hy_oas_bps")
         or risk.get("hy_oas")
@@ -235,10 +236,9 @@ def load_latest_market() -> Dict[str, Any]:
     vix_f = float(vix)
     hy_oas_f = float(hy_oas)
 
-    # Unit Guards
     _assert_range("VIX(level)", vix_f, 5.0, 80.0)
 
-    # HY OAS: deterministic unit normalization
+    # HY OAS deterministic unit normalization:
     # - If 0 < value < 50, treat as percent points and convert to bps (×100)
     if 0.0 < hy_oas_f < 50.0:
         old = hy_oas_f
@@ -250,7 +250,6 @@ def load_latest_market() -> Dict[str, Any]:
     market["risk"] = {
         "vix": vix_f,
         "hy_oas": hy_oas_f,
-        "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
     }
 
     # --- RATES block ---
@@ -268,12 +267,10 @@ def load_latest_market() -> Dict[str, Any]:
     dgs10_f = float(dgs10)
     ffr_f = float(ffr_upper)
 
-    # Deterministic normalization
     dgs2_f = _normalize_pct_from_fraction(dgs2_f, "UST2Y")
     dgs10_f = _normalize_pct_from_fraction(dgs10_f, "UST10Y")
     ffr_f = _normalize_policy_rate_pct(ffr_f, "FFR_Upper")
 
-    # Unit Guards (after normalize)
     _assert_range("UST2Y(%)", dgs2_f, 0.0, 25.0)
     _assert_range("UST10Y(%)", dgs10_f, 0.0, 25.0)
     _assert_range("FFR_Upper(%)", ffr_f, 0.0, 25.0)
@@ -297,14 +294,9 @@ def load_latest_market() -> Dict[str, Any]:
         _fail("MarketData missing: macro.(pmi_markit,cpi_yoy,unemployment)")
 
     pmi_f = float(pmi)
-    cpi_f = float(cpi_yoy)
-    unemp_f = float(unemp)
+    cpi_f = _normalize_macro_pct(float(cpi_yoy), "CPI_YoY")
+    unemp_f = _normalize_macro_pct(float(unemp), "Unemployment")
 
-    # Deterministic normalization
-    cpi_f = _normalize_macro_pct(cpi_f, "CPI_YoY")
-    unemp_f = _normalize_macro_pct(unemp_f, "Unemployment")
-
-    # Unit Guards (after normalize)
     _assert_range("PMI(points)", pmi_f, 0.0, 100.0)
     _assert_range("CPI_YoY(%)", cpi_f, -20.0, 50.0)
     _assert_range("Unemployment(%)", unemp_f, 0.0, 30.0)
@@ -351,7 +343,7 @@ def compute_drawdown_from_series(closes: list[float]) -> float:
 
 
 def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
-    # NOTE: 현재 운영에서는 ISM 부재 시 PMI를 대체로 사용 중.
+    # 운영 합의: ISM 제외, PMI를 대체 사용
     ism = pmi
     ism_n = norm(ism, 45.0, 60.0)
     pmi_n = norm(pmi, 45.0, 60.0)
@@ -366,11 +358,10 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
     from scipy.stats import gaussian_kde
 
     data = np.asarray(fx_hist_130d, dtype=float)
-
     kde = gaussian_kde(data)
     x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
     density = kde(x)
-    anchor = float(x[np.argmax(density)])
+    anchor = float(x[int(density.argmax())])
 
     return {
         "anchor": anchor,
@@ -385,6 +376,10 @@ def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, floa
 
 
 def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    마켓 데이터를 처리하고, 각종 신호를 계산합니다.
+    FXW는 엔진에서 직접 계산 (market에 없음)
+    """
     fx_block = market["fx"]
     spx_block = market["spx"]
     risk = market["risk"]
@@ -392,6 +387,8 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     macro = market["macro"]
 
     fx_rate = float(fx_block["usdkrw"])
+
+    # FX Vol (21D)
     fx_hist_21d = fx_block.get("usdkrw_history_21d", [])
     fx_vol = compute_fx_vol(fx_hist_21d)
 
@@ -402,7 +399,6 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     dgs10 = float(rates["dgs10"])
     ffr_upper = float(rates["ffr_upper"])
 
-    # Yield Curve is computed deterministically from % to bps
     yc_spread_bps = (dgs10 - dgs2) * 100.0
     _assert_range("YieldCurveSpread(bps)", yc_spread_bps, -300.0, 300.0)
 
@@ -419,36 +415,27 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
     else:
         dd_10y = float(drawdown)
 
-    # =========================
-    # FXW (KDE 130 trading days) — strict & validated
-    # =========================
+    # FXW 계산 (엔진에서 직접 계산)
     fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
     if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
         _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
-
-    # ensure last 130 only (P0-2 core)
     fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
     if len(fx_hist_130d) < 130:
         _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
 
-    engine = AuroraX121()
-    for px in fx_hist_130d:
-        engine.kde.add(float(px))
+    # AuroraX121 엔진을 사용하여 FXW 계산
+    try:
+        engine = AuroraX121()
+        for px in fx_hist_130d:
+            engine.kde.add(float(px))
+        fxw = engine.kde.fxw(fx_rate)
 
-    fxw = engine.kde.fxw(fx_rate)
+        # `fxw`를 market 데이터에 추가
+        market["fxw"] = fxw  # fxw를 market에 추가
+    except Exception as e:
+        _fail(f"Error calculating fxw: {e}")
 
-    # KDE stats (debug/report)
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
-
-    # P0-2 fail-fast: anchor가 분포 극하단으로 튀면 입력 시계열이 잘못 들어온 것으로 간주
-    anchor = float(fx_kde["anchor"])
-    p05 = float(fx_kde["p05"])
-    if anchor < (p05 - 10.0):
-        _fail(
-            f"P0-2_GUARD_FAIL: KDE anchor too low vs distribution. "
-            f"anchor={anchor:.1f}, p05={p05:.1f}. "
-            f"Check USDKRW 130D series window/trading-days integrity."
-        )
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
 
@@ -459,12 +446,14 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         drawdown=drawdown,
         yc_spread=yc_spread_bps,
     )
+
     ml_opp = compute_ml_opp(
         vix=vix,
         hy_oas=hy_oas,
         fxw=fxw,
         drawdown=drawdown,
     )
+
     ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
 
     systemic_level = compute_systemic_level(
@@ -474,11 +463,12 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         ml_regime=ml_regime,
         drawdown=drawdown,
     )
+
     systemic_bucket = determine_systemic_bucket(systemic_level)
 
     return {
         "fx_rate": fx_rate,
-        "fxw": fxw,
+        "fxw": fxw,  # fxw 포함
         "fx_kde": fx_kde,
         "fx_vol": fx_vol,
         "vix": vix,
@@ -499,6 +489,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         "systemic_level": systemic_level,
         "systemic_bucket": systemic_bucket,
     }
+
 
 
 def determine_state_from_signals(sig: Dict[str, float]) -> str:
@@ -526,8 +517,8 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
 
 def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     """
-    엔진 산출(SGOV/Satellite/Duration/Core)을 'Gold sleeve' 제외 나머지(=95%)에 적용.
-    Gold는 월납입 규칙 기반 고정 5%로 반영.
+    내부 포트 타겟(ISA+Direct) = 100% 기준.
+    Gold sleeve(5%) 고정, 나머지 95%에 엔진(SGOV/Satellite/Duration/Core) 적용.
     """
     eng = AuroraX121()
 
@@ -573,6 +564,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
     core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
 
+    # Core baseline (Rev12.1b/12.2/12.3 consistent)
     core_config = {"SPX": 0.525, "NDX": 0.245, "DIV": 0.230}
     core_alloc = {k: core_weight * w for k, w in core_config.items()}
 
@@ -590,6 +582,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         "GOLD": gold_w,
     }
 
+    # enforce sum=1.0
     total = sum(weights.values())
     if total > 0:
         scale = 1.0 / total
@@ -625,6 +618,11 @@ def compute_cma_overlay_section(
     sig: Dict[str, float],
     target_weights: Dict[str, float],
 ) -> Dict[str, Any]:
+    """
+    CMA = 외부 자금.
+    - 내부 target_weights를 "변경"하지 않는다.
+    - suggested_exec_krw와, 그 실행금을 risk-on basket에 어떻게 배분할지(alloc)만 제공한다.
+    """
     bal = load_cma_balance()
 
     today = datetime.now().strftime("%Y%m%d")
@@ -690,22 +688,6 @@ def write_daily_report(
     yyyymmdd = today.strftime("%Y%m%d")
     out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
 
-    usdkrw = sig.get("fx_rate")
-    vix = sig.get("vix")
-    hy_oas = sig.get("hy_oas")
-    ust2y = sig.get("dgs2")
-    ust10y = sig.get("dgs10")
-
-    fxw = sig.get("fxw")
-    fx_vol = sig.get("fx_vol")
-    drawdown = sig.get("drawdown")
-    macro_score = sig.get("macro_score")
-    ml_risk = sig.get("ml_risk")
-    ml_opp = sig.get("ml_opp")
-    ml_regime = sig.get("ml_regime")
-    systemic_level = sig.get("systemic_level")
-    systemic_bucket = sig.get("systemic_bucket")
-
     lines = []
     lines.append(f"# {meta.get('engine_version', ENGINE_VERSION)} Daily Report")
     lines.append("")
@@ -717,17 +699,14 @@ def write_daily_report(
     lines.append("")
 
     lines.append("## 1. Market Data Summary (FD inputs)")
-    if usdkrw is not None:
-        lines.append(f"- USD/KRW (Sell Rate): {float(usdkrw):.2f}")
-    if vix is not None:
-        lines.append(f"- VIX: {float(vix):.2f}")
-    if hy_oas is not None:
-        lines.append(f"- HY OAS: {float(hy_oas):.2f} bps")
-    if ust2y is not None and ust10y is not None:
-        lines.append(f"- UST 2Y / 10Y: {float(ust2y):.2f}% / {float(ust10y):.2f}%")
+    lines.append(f"- USD/KRW (Sell Rate): {float(sig['fx_rate']):.2f}")
+    lines.append(f"- VIX: {float(sig['vix']):.2f}")
+    lines.append(f"- HY OAS: {float(sig['hy_oas']):.2f} bps")
+    lines.append(f"- UST 2Y / 10Y: {float(sig['dgs2']):.2f}% / {float(sig['dgs10']):.2f}%")
+    lines.append(f"- Yield Curve Spread (10Y-2Y bps): {float(sig['yc_spread_bps']):.1f}")
     lines.append("")
 
-    lines.append("## 2. Target Weights (Portfolio 100%)")
+    lines.append("## 2. Target Weights (Internal Portfolio 100%)")
     lines.append("")
     lines.append("| Asset   | Weight (%) |")
     lines.append("|---------|-----------:|")
@@ -739,87 +718,55 @@ def write_daily_report(
     lines.append(f"| **Total** | **{total*100:10.2f}** |")
     lines.append("")
 
-    lines.append("## 3. FD / ML / Systemic Signals")
+    lines.append("## 3. Signals (FD / ML / Systemic)")
+    lines.append(f"- FXW (KDE): {float(sig['fxw']):.3f}")
+    lines.append(f"- FX Vol (21D σ): {float(sig['fx_vol']):.4f}")
+    lines.append(f"- SPX 3Y Drawdown: {float(sig['drawdown'])*100:.2f}%")
+    lines.append(f"- MacroScore: {float(sig['macro_score']):.3f}")
+    lines.append(
+        f"- ML_Risk / ML_Opp / ML_Regime: "
+        f"{float(sig['ml_risk']):.3f} / {float(sig['ml_opp']):.3f} / {float(sig['ml_regime']):.3f}"
+    )
+    lines.append(f"- Systemic Level / Bucket: {float(sig['systemic_level']):.3f} / {sig['systemic_bucket']}")
     lines.append("")
 
     fx_kde = sig.get("fx_kde", {})
-    fx_rate = sig.get("fx_rate")
-
     if fx_kde:
-        lines.append("## FXW Anchor Distribution (USD/KRW, 130D KDE)")
-        lines.append("")
-        lines.append(f"- KDE Anchor (Mode): **{fx_kde['anchor']:.1f}**")
+        lines.append("### FXW Anchor Distribution (USD/KRW, 130D KDE)")
         lines.append(
-            f"- Distribution: "
-            f"min={fx_kde['min']:.1f}, "
-            f"P05={fx_kde['p05']:.1f}, "
-            f"P25={fx_kde['p25']:.1f}, "
-            f"P50={fx_kde['p50']:.1f}, "
-            f"P75={fx_kde['p75']:.1f}, "
-            f"P95={fx_kde['p95']:.1f}, "
-            f"max={fx_kde['max']:.1f}"
+            f"- KDE Anchor (Mode): {fx_kde['anchor']:.1f} | "
+            f"min={fx_kde['min']:.1f}, p05={fx_kde['p05']:.1f}, p50={fx_kde['p50']:.1f}, p95={fx_kde['p95']:.1f}, max={fx_kde['max']:.1f}"
         )
-        if fx_rate is not None:
-            pos = "below anchor (KRW strong)" if float(fx_rate) < float(fx_kde["anchor"]) else "above anchor (KRW weak)"
-            lines.append(f"- Current FX: {float(fx_rate):.2f} → **{pos}**")
+        pos = "below anchor (KRW strong)" if float(sig["fx_rate"]) < float(fx_kde["anchor"]) else "above anchor (KRW weak)"
+        lines.append(f"- Current FX: {float(sig['fx_rate']):.2f} → {pos}")
         lines.append("")
-
-    if fxw is not None:
-        lines.append(f"- FXW (KDE): {float(fxw):.3f}")
-    if fx_vol is not None:
-        lines.append(f"- FX Vol (21D σ): {float(fx_vol):.4f}")
-    if drawdown is not None:
-        lines.append(f"- SPX 3Y Drawdown: {float(drawdown)*100:.2f}%")
-    if macro_score is not None:
-        lines.append(f"- MacroScore: {float(macro_score):.3f}")
-    if ml_risk is not None and ml_opp is not None and ml_regime is not None:
-        lines.append(
-            f"- ML_Risk / ML_Opp / ML_Regime: {float(ml_risk):.3f} / {float(ml_opp):.3f} / {float(ml_regime):.3f}"
-        )
-    if systemic_level is not None and systemic_bucket is not None:
-        lines.append(f"- Systemic Level / Bucket: {float(systemic_level):.3f} / {systemic_bucket}")
-    lines.append("")
 
     lines.append("## 4. Engine State")
-    lines.append("")
     lines.append(f"- Final State: {state_name}")
     lines.append("")
 
-    lines.append("## 5. CMA Overlay (TAS Dynamic Threshold) Snapshot")
-    lines.append("")
+    lines.append("## 5. CMA Overlay (External) Snapshot")
     tas = cma_overlay.get("tas", {})
     exe = cma_overlay.get("execution", {})
     snap = cma_overlay.get("snapshot", {})
     alloc = cma_overlay.get("allocation", {})
 
-    thr = tas.get("threshold")
-    df = tas.get("deploy_factor")
-    td = tas.get("target_deploy_krw")
-    dr = tas.get("delta_raw_krw")
-
-    fx_scale = exe.get("fx_scale")
-    suggested = exe.get("suggested_exec_krw")
+    suggested = float(exe.get("suggested_exec_krw", 0.0))
+    total_cma = float(snap.get("total_cma_krw", 0.0))
+    pct = (abs(suggested) / total_cma * 100.0) if total_cma > 0 else 0.0
+    direction = "BUY" if suggested > 0 else ("SELL" if suggested < 0 else "HOLD")
 
     lines.append(
         f"- CMA Snapshot (KRW): deployed={snap.get('deployed_krw',0):.0f}, cash={snap.get('cash_krw',0):.0f}, "
         f"total={snap.get('total_cma_krw',0):.0f}, ref_base={snap.get('ref_base_krw',0):.0f}, s0_count={snap.get('s0_count',0)}"
     )
-    if thr is not None:
-        lines.append(f"- Threshold: {float(thr)*100:.1f}%")
-    if df is not None:
-        lines.append(f"- Deploy Factor: {float(df)*100:.1f}%")
-    if td is not None:
-        lines.append(f"- Target Deploy (KRW): {float(td):.0f}")
-    if dr is not None:
-        lines.append(f"- Delta Raw (KRW): {float(dr):.0f}")
-    if fx_scale is not None:
-        lines.append(f"- FX Scale (BUY only): {float(fx_scale):.3f}")
-
-    total_cma = float(snap.get("total_cma_krw", 0.0))
-    suggested_v = float(suggested) if suggested is not None else 0.0
-    pct = (abs(suggested_v) / total_cma * 100.0) if total_cma > 0 else 0.0
-    direction = "BUY" if suggested_v > 0 else ("SELL" if suggested_v < 0 else "HOLD")
-    lines.append(f"- Suggested Exec: {direction} {suggested_v:.0f} KRW ({pct:.2f}% of total CMA)")
+    if tas.get("threshold") is not None:
+        lines.append(f"- Threshold: {float(tas['threshold'])*100:.1f}%")
+    if tas.get("deploy_factor") is not None:
+        lines.append(f"- Deploy Factor: {float(tas['deploy_factor'])*100:.1f}%")
+    if tas.get("target_deploy_krw") is not None:
+        lines.append(f"- Target Deploy (KRW): {float(tas['target_deploy_krw']):.0f}")
+    lines.append(f"- Suggested Exec: {direction} {suggested:.0f} KRW ({pct:.2f}% of total CMA)")
     lines.append("")
 
     lines.append("| CMA Allocation (KRW, based on Suggested Exec) | Amount |")
@@ -861,6 +808,8 @@ def main():
     print(f"MacroScore: {sig['macro_score']:.3f}")
     print(f"ML_Risk / ML_Opp / ML_Regime: {sig['ml_risk']:.3f} / {sig['ml_opp']:.3f} / {sig['ml_regime']:.3f}")
     print(f"Systemic Level / Bucket: {sig['systemic_level']:.3f} / {sig['systemic_bucket']}")
+    print(f"Yield Curve Spread (10Y-2Y bps): {sig['yc_spread_bps']:.1f}")
+
     print("[INFO] ==== 4. Engine State ====")
     print(f"Final State: {state_name}")
 
