@@ -272,3 +272,201 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
         weights = {k: v * scale for k, v in weights.items()}
 
     return weights
+
+
+def load_cma_balance(path: Path = None) -> Dict[str, Any]:
+    if path is None:
+        path = DATA_DIR / "cma_balance.json"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    deployed = float(obj.get("deployed_krw", 0))
+    cash = float(obj.get("cash_krw", 0))
+    asof = str(obj.get("asof_yyyymm", ""))
+    ref_base = float(obj.get("ref_base_krw", 0))
+    return {
+        "asof_yyyymm": asof,
+        "deployed_krw": deployed,
+        "cash_krw": cash,
+        "ref_base_krw": ref_base,
+    }
+
+
+def _find_latest_cma_state_file() -> Path | None:
+    files = sorted(DATA_DIR.glob("cma_state_20*.json"))
+    return files[-1] if files else None
+
+
+def compute_cma_overlay_section(
+    sig: Dict[str, float],
+    target_weights: Dict[str, float],
+) -> Dict[str, Any]:
+    bal = load_cma_balance()
+
+    today = datetime.now().strftime("%Y%m%d")
+    cma_state_path = DATA_DIR / f"cma_state_{today}.json"
+
+    if cma_state_path.exists():
+        prev_state = load_cma_state(cma_state_path)
+    else:
+        latest_prev = _find_latest_cma_state_file()
+        prev_state = load_cma_state(latest_prev) if latest_prev else None
+
+    dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
+    dd_10y = float(sig.get("dd_10y", 0.0))
+    state_name = determine_state_from_signals(sig)
+
+    out = plan_cma_action(
+        asof_yyyymm=bal["asof_yyyymm"],
+        deployed_krw=bal["deployed_krw"],
+        cash_krw=bal["cash_krw"],
+        operator_ref_base_krw=float(bal.get("ref_base_krw", 0.0)),
+        fxw=float(sig["fxw"]),
+        vix=float(sig["vix"]),
+        hy_oas=float(sig["hy_oas"]),
+        dd_mag_3y=dd_mag_3y,
+        long_term_dd_10y=dd_10y,
+        ml_risk=float(sig["ml_risk"]),
+        systemic_bucket=str(sig["systemic_bucket"]),
+        final_state_name=state_name,
+        prev_cma_state=prev_state,
+    )
+
+    save_cma_state(out["_state_obj"], cma_state_path)
+
+    suggested_exec = float(out["execution"]["suggested_exec_krw"])
+    alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
+
+    basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
+    denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
+    risk_on_w = {
+        k: (max(0.0, float(target_weights.get(k, 0.0))) / denom if denom > 0 else 0.0)
+        for k in basket
+    }
+
+    return {
+        "state": state_name,
+        "snapshot": out["cma_snapshot"],
+        "tas": out["tas"],
+        "execution": out["execution"],
+        "allocation": alloc,
+        "risk_on_target_weights": risk_on_w,
+    }
+
+
+def write_daily_report(
+    sig: Dict[str, Any],
+    final_weights: Dict[str, float],
+    state_name: str,
+    cma_overlay: Dict[str, Any],
+    meta: Dict[str, Any],
+) -> None:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.now().date()
+    yyyymmdd = today.strftime("%Y%m%d")
+    out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
+
+    # 기존 레포트 항목
+    lines = []
+    lines.append("# AURORA Rev12.4 Daily Report")
+    lines.append("")
+    lines.append(f"- Report Date: {today.isoformat()}")
+    lines.append(f"- Engine Version: {meta.get('engine_version')}")
+    lines.append(f"- Git Commit: {meta.get('git_commit')}")
+    lines.append(f"- Run ID: {meta.get('run_id')}")
+    lines.append(f"- Timestamp(UTC): {meta.get('timestamp_utc')}")
+    lines.append("")
+
+    # 시장 데이터 요약
+    lines.append("## 1. Market Data Summary (FD inputs)")
+    if sig.get("fx_rate"):
+        lines.append(f"- USD/KRW (Sell Rate): {sig['fx_rate']:.2f}")
+    if sig.get("vix"):
+        lines.append(f"- VIX: {sig['vix']:.2f}")
+    if sig.get("hy_oas"):
+        lines.append(f"- HY OAS: {sig['hy_oas']:.2f} bps")
+    lines.append("")
+
+    # CMA 상태 추가
+    lines.append("## 2. CMA State and Overlay")
+    lines.append(f"- Ref Base KRW: {cma_overlay['cma_snapshot']['ref_base_krw']}")
+    lines.append(f"- S0 Count: {cma_overlay['cma_snapshot']['s0_count']}")
+    lines.append(f"- Last S0 YYYMM: {cma_overlay['cma_snapshot']['last_s0_yyyymm']}")
+    lines.append(f"- CMA Total: {cma_overlay['cma_snapshot']['total_cma_krw']}")
+    lines.append(f"- Target Deploy (KRW): {cma_overlay['tas']['target_deploy_krw']}")
+    lines.append(f"- Suggested Execution: {cma_overlay['execution']['suggested_exec_krw']}")
+    lines.append("")
+
+    # 포트폴리오 비중 출력
+    lines.append("## 3. Target Weights (Portfolio 100%)")
+    lines.append("| Asset   | Weight (%) |")
+    lines.append("|---------|-----------:|")
+    total = 0.0
+    for key in ["SPX", "NDX", "DIV", "EM", "ENERGY", "DURATION", "SGOV", "GOLD"]:
+        w = final_weights.get(key, 0.0)
+        total += w
+        lines.append(f"| {key:7s} | {w*100:10.2f} |")
+    lines.append(f"| **Total** | **{total*100:10.2f}** |")
+    lines.append("")
+
+    # CMA Overlay Allocation (SPX, NDX, DIV, EM, ENERGY)
+    lines.append("## 4. CMA Overlay Allocation")
+    for key, value in cma_overlay['risk_on_target_weights'].items():
+        lines.append(f"- {key}: {value*100:.2f}%")
+    
+    # 최종 레포트 파일 저장
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"[REPORT] Daily report written to: {out_path}")
+
+
+def main():
+    market = load_latest_market()  # 마켓 데이터 로드
+    sig = build_signals(market)  # 신호 계산
+    weights = compute_portfolio_target(sig)  # 포트폴리오 목표 비중 계산
+    state_name = determine_state_from_signals(sig)  # 엔진 상태 결정
+
+    cma_overlay = compute_cma_overlay_section(sig, weights)  # CMA Overlay 계산
+
+    # 리포트 출력
+    print("[INFO] ==== 3. FD / ML / Systemic Signals ====")
+    print(f"FXW (KDE): {sig['fxw']:.3f}")
+    print(f"FX Vol (21D σ): {sig['fx_vol']:.4f}")
+    print(f"SPX 3Y Drawdown: {sig['drawdown']*100:.2f}%")
+    print(f"MacroScore: {sig['macro_score']:.3f}")
+    print(f"ML_Risk / ML_Opp / ML_Regime: {sig['ml_risk']:.3f} / {sig['ml_opp']:.3f} / {sig['ml_regime']:.3f}")
+    print(f"Systemic Level / Bucket: {sig['systemic_level']:.3f} / {sig['systemic_bucket']}")
+
+    print("[INFO] ==== 4. Engine State ====")
+    print(f"Final State: {state_name}")
+
+    print("[INFO] ==== 5. CMA Overlay Snapshot ====")
+    print(f"Threshold: {cma_overlay['tas']['threshold']*100:.1f}%")
+    print(f"Deploy Factor: {cma_overlay['tas']['deploy_factor']*100:.1f}%")
+
+    today = datetime.now().strftime("%Y%m%d")
+    out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
+
+    meta = {
+        "engine_version": "AURORA-Rev12.4",
+        "git_commit": os.getenv("GITHUB_SHA", ""),
+        "run_id": os.getenv("GITHUB_RUN_ID", ""),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+    out = {
+        "date": today,
+        "meta": meta,
+        "signals": {**sig, "state": state_name},
+        "weights": weights,
+        "cma_overlay": cma_overlay,
+    }
+
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2, ensure_ascii=False)
+    print(f"[OK] Target weights JSON saved to: {out_path}")
+
+    write_daily_report(sig, weights, state_name, cma_overlay, meta)  # 레포트 작성
+
+
+if __name__ == "__main__":
+    main()
