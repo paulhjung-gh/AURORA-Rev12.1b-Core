@@ -1,5 +1,3 @@
-# scripts/run_engine_auto.py
-
 import os
 import sys
 import json
@@ -133,390 +131,73 @@ def _normalize_macro_pct(x: float, name: str) -> float:
     return x
 
 
-def load_latest_market() -> Dict[str, Any]:
+def calculate_alpha(asset: str, signals: Dict[str, float]) -> float:
     """
-    Canonical input: data/market_data_YYYYMMDD.json
-    - 절대 외부 다운로드로 보충하지 않음 (Determinism)
+    자산군에 대한 알파를 계산합니다.
+    - asset: 'SPX', 'NDX', 'DIV' 중 하나
+    - signals: {'vix': vix_value, 'drawdown': drawdown_value, 'fxw': fxw_value, 'ml_risk': ml_risk_value, 'systemic_bucket': systemic_bucket_value, ...}
     """
-    files = sorted(DATA_DIR.glob("market_data_20*.json"))
-    if not files:
-        raise FileNotFoundError("data/ 폴더에 market_data_*.json 이 없습니다.")
-
-    latest = files[-1]
-    with latest.open("r", encoding="utf-8") as f:
-        raw = json.load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError("market_data_* JSON 최상위 구조는 dict 여야 합니다.")
-
-    # ✅ Data freshness (DATE ONLY, ignore time)
-    today = datetime.now().strftime("%Y%m%d")
-    meta = raw.get("meta", {})
-    if isinstance(meta, dict):
-        generated = meta.get("generated_yyyymmdd") or meta.get("date") or meta.get("generated_date")
-        if generated is not None and str(generated) != today:
-            _fail(f"STALE market data: meta.generated_yyyymmdd={generated}, today={today}, file={latest.name}")
-
-    market: Dict[str, Any] = dict(raw)
-
-    # --- FX block ---
-    fx = raw.get("fx", {})
-    if not isinstance(fx, dict):
-        fx = {}
-
-    usdkrw = fx.get("usdkrw") or raw.get("usdkrw") or raw.get("usdkrw_sell") or raw.get("fx_usdkrw")
-    if usdkrw is None:
-        _fail("MarketData missing: fx.usdkrw")
-
-    hist_21d = fx.get("usdkrw_history_21d") or raw.get("usdkrw_history_21d") or raw.get("fx_hist_21d")
-    hist_130d = fx.get("usdkrw_history_130d") or raw.get("usdkrw_history_130d") or raw.get("fx_hist_130d")
-
-    fx_hist_21d = _clean_float_series(hist_21d, "fx.usdkrw_history_21d")
-    fx_hist_130d = _clean_float_series(hist_130d, "fx.usdkrw_history_130d")
-
-    if len(fx_hist_21d) < 2:
-        _fail("MarketData missing/insufficient: fx.usdkrw_history_21d (need>=2)")
-    if len(fx_hist_130d) < 130:
-        _fail(f"MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130, got={len(fx_hist_130d)})")
-
-    # P0-2: 반드시 최근 130 trading days만 사용 (tail 130)
-    fx_hist_130d = fx_hist_130d[-130:]
-
-    market["fx"] = {
-        "usdkrw": float(usdkrw),
-        "latest": float(usdkrw),
-        "usdkrw_history_21d": fx_hist_21d,
-        "usdkrw_history_130d": fx_hist_130d,
-        "fx_vol_21d_sigma": fx.get("fx_vol_21d_sigma", raw.get("fx_vol_21d_sigma")),
-    }
-
-    # --- SPX block ---
-    spx = raw.get("spx", {})
-    if not isinstance(spx, dict):
-        spx = {}
-
-    spx_last = spx.get("last") or raw.get("spx_last") or raw.get("spx")
-    closes_3y = spx.get("closes_3y_1095") or spx.get("history_3y") or raw.get("spx_3y_closes_1095")
-    if spx_last is None:
-        _fail("MarketData missing: spx.last")
-    if not isinstance(closes_3y, list) or len(closes_3y) < 200:
-        _fail("MarketData missing/insufficient: spx.closes_3y_1095 (need meaningful series)")
-
-    market["spx"] = {
-        "last": float(spx_last),
-        "closes_3y_1095": [float(x) for x in closes_3y],
-        "closes_10y": spx.get("closes_10y") or raw.get("spx_10y_closes"),
-    }
-
-    # --- RISK block ---
-    risk = raw.get("risk", {})
-    if not isinstance(risk, dict):
-        risk = {}
-
-    vix = risk.get("vix") or raw.get("vix")
-
-    hy_oas = (
-        risk.get("hy_oas_bps")
-        or risk.get("hy_oas")
-        or raw.get("hy_oas_bps")
-        or raw.get("hy_oas")
-    )
-
-    if vix is None:
-        _fail("MarketData missing: risk.vix")
-    if hy_oas is None:
-        _fail("MarketData missing: risk.hy_oas (bps)")
-
-    vix_f = float(vix)
-    hy_oas_f = float(hy_oas)
-
-    # Unit Guards
-    _assert_range("VIX(level)", vix_f, 5.0, 80.0)
-
-    # HY OAS: deterministic unit normalization
-    # - If 0 < value < 50, treat as percent points and convert to bps (×100)
-    if 0.0 < hy_oas_f < 50.0:
-        old = hy_oas_f
-        hy_oas_f *= 100.0
-        print(f"[UNIT] HY_OAS normalized: percent->bps ({old} -> {hy_oas_f})")
-
-    _assert_range("HY_OAS(bps)", hy_oas_f, 50.0, 2000.0)
-
-    market["risk"] = {
-        "vix": vix_f,
-        "hy_oas": hy_oas_f,
-        "yc_spread": float(risk.get("yc_spread", raw.get("yc_spread", 0.0))),
-    }
-
-    # --- RATES block ---
-    rates = raw.get("rates", {})
-    if not isinstance(rates, dict):
-        rates = {}
-
-    dgs2 = rates.get("dgs2") or raw.get("dgs2") or raw.get("ust2y_pct") or raw.get("ust2y")
-    dgs10 = rates.get("dgs10") or raw.get("dgs10") or raw.get("ust10y_pct") or raw.get("ust10y")
-    ffr_upper = rates.get("ffr_upper") or raw.get("ffr_upper_pct") or raw.get("ffr_upper") or raw.get("ffr")
-    if dgs2 is None or dgs10 is None or ffr_upper is None:
-        _fail("MarketData missing: rates.(dgs2,dgs10,ffr_upper)")
-
-    dgs2_f = float(dgs2)
-    dgs10_f = float(dgs10)
-    ffr_f = float(ffr_upper)
-
-    # Deterministic normalization
-    dgs2_f = _normalize_pct_from_fraction(dgs2_f, "UST2Y")
-    dgs10_f = _normalize_pct_from_fraction(dgs10_f, "UST10Y")
-    ffr_f = _normalize_policy_rate_pct(ffr_f, "FFR_Upper")
-
-    # Unit Guards (after normalize)
-    _assert_range("UST2Y(%)", dgs2_f, 0.0, 25.0)
-    _assert_range("UST10Y(%)", dgs10_f, 0.0, 25.0)
-    _assert_range("FFR_Upper(%)", ffr_f, 0.0, 25.0)
-
-    market["rates"] = {
-        "dgs2": dgs2_f,
-        "dgs10": dgs10_f,
-        "ffr_upper": ffr_f,
-    }
-
-    # --- MACRO block ---
-    macro = raw.get("macro", {})
-    if not isinstance(macro, dict):
-        macro = {}
-
-    pmi = macro.get("pmi_markit") or macro.get("pmi") or raw.get("pmi_markit") or raw.get("pmi_sp_global")
-    cpi_yoy = macro.get("cpi_yoy") or raw.get("cpi_yoy_pct") or raw.get("cpi_yoy")
-    unemp = macro.get("unemployment") or raw.get("unemp_rate_pct") or raw.get("unemployment_rate")
-
-    if pmi is None or cpi_yoy is None or unemp is None:
-        _fail("MarketData missing: macro.(pmi_markit,cpi_yoy,unemployment)")
-
-    pmi_f = float(pmi)
-    cpi_f = float(cpi_yoy)
-    unemp_f = float(unemp)
-
-    # Deterministic normalization
-    cpi_f = _normalize_macro_pct(cpi_f, "CPI_YoY")
-    unemp_f = _normalize_macro_pct(unemp_f, "Unemployment")
-
-    # Unit Guards (after normalize)
-    _assert_range("PMI(points)", pmi_f, 0.0, 100.0)
-    _assert_range("CPI_YoY(%)", cpi_f, -20.0, 50.0)
-    _assert_range("Unemployment(%)", unemp_f, 0.0, 30.0)
-
-    market["macro"] = {
-        "pmi_markit": pmi_f,
-        "cpi_yoy": cpi_f,
-        "unemployment": unemp_f,
-    }
-
-    # --- ETF block (optional) ---
-    etf = raw.get("etf") or raw.get("etf_close") or {}
-    if not isinstance(etf, dict):
-        etf = {}
-    market["etf"] = etf
-
-    print(f"[INFO] Loaded market data JSON: {latest}")
-    return market
-
-
-def compute_fx_vol(fx_hist_21d: list) -> float:
-    if not fx_hist_21d or len(fx_hist_21d) < 2:
-        return 0.0
-    rets = []
-    for a, b in zip(fx_hist_21d[:-1], fx_hist_21d[1:]):
-        if a <= 0 or b <= 0:
-            continue
-        rets.append(math.log(b / a))
-    if not rets:
-        return 0.0
-    mu = sum(rets) / len(rets)
-    var = sum((r - mu) ** 2 for r in rets) / max(1, len(rets) - 1)
-    return var ** 0.5
-
-
-def compute_drawdown_from_series(closes: list[float]) -> float:
-    if not closes:
-        return 0.0
-    peak = max(closes)
-    last = closes[-1]
-    if peak <= 0:
-        return 0.0
-    return (last - peak) / peak  # negative in drawdown
-
-
-def compute_macro_score_from_market(pmi: float, cpi_yoy: float, unemployment: float) -> float:
-    # NOTE: 현재 운영에서는 ISM 부재 시 PMI를 대체로 사용 중.
-    ism = pmi
-    ism_n = norm(ism, 45.0, 60.0)
-    pmi_n = norm(pmi, 45.0, 60.0)
-    cpi_n = 1.0 - norm(cpi_yoy, 2.0, 8.0)
-    unemp_n = 1.0 - norm(unemployment, 3.0, 7.0)
-    macro = 0.25 * (ism_n + pmi_n + cpi_n + unemp_n)
-    return clip(macro, 0.0, 1.0)
-
-
-def compute_fx_kde_anchor_and_stats(fx_hist_130d: list[float]) -> Dict[str, float]:
-    import numpy as np
-    from scipy.stats import gaussian_kde
-
-    data = np.asarray(fx_hist_130d, dtype=float)
-
-    kde = gaussian_kde(data)
-    x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
-    density = kde(x)
-    anchor = float(x[np.argmax(density)])
-
-    return {
-        "anchor": anchor,
-        "p05": float(np.percentile(data, 5)),
-        "p25": float(np.percentile(data, 25)),
-        "p50": float(np.percentile(data, 50)),
-        "p75": float(np.percentile(data, 75)),
-        "p95": float(np.percentile(data, 95)),
-        "min": float(data.min()),
-        "max": float(data.max()),
-    }
-
-
-def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
-    fx_block = market["fx"]
-    spx_block = market["spx"]
-    risk = market["risk"]
-    rates = market["rates"]
-    macro = market["macro"]
-
-    fx_rate = float(fx_block["usdkrw"])
-    fx_hist_21d = fx_block.get("usdkrw_history_21d", [])
-    fx_vol = compute_fx_vol(fx_hist_21d)
-
-    vix = float(risk["vix"])
-    hy_oas = float(risk["hy_oas"])
-
-    dgs2 = float(rates["dgs2"])
-    dgs10 = float(rates["dgs10"])
-    ffr_upper = float(rates["ffr_upper"])
-
-    # Yield Curve is computed deterministically from % to bps
-    yc_spread_bps = (dgs10 - dgs2) * 100.0
-    _assert_range("YieldCurveSpread(bps)", yc_spread_bps, -300.0, 300.0)
-
-    pmi = float(macro["pmi_markit"])
-    cpi_yoy = float(macro["cpi_yoy"])
-    unemployment = float(macro["unemployment"])
-
-    closes_3y = spx_block.get("closes_3y_1095", [])
-    drawdown = compute_drawdown_from_series(closes_3y)
-
-    closes_10y = spx_block.get("closes_10y")
-    if isinstance(closes_10y, list) and len(closes_10y) >= 200:
-        dd_10y = compute_drawdown_from_series([float(x) for x in closes_10y])
+   
+    # 기본 알파 값은 0
+    alpha = 0.0
+   
+    # VIX에 따른 조정
+    vix = signals["vix"]
+    if vix >= 30:
+        vix_alpha = -0.05  # VIX가 높으면 리스크가 커져서 비중을 낮춤
+    elif vix <= 15:
+        vix_alpha = 0.05  # VIX가 낮으면 비중을 늘림
     else:
-        dd_10y = float(drawdown)
-
-    # =========================
-    # FXW (KDE 130 trading days) — strict & validated
-    # =========================
-    fx_hist_130d = fx_block.get("usdkrw_history_130d", [])
-    if not isinstance(fx_hist_130d, list) or len(fx_hist_130d) < 130:
-        _fail("MarketData missing/insufficient: fx.usdkrw_history_130d (need>=130)")
-
-    # ensure last 130 only (P0-2 core)
-    fx_hist_130d = _clean_float_series(fx_hist_130d, "fx.usdkrw_history_130d")[-130:]
-    if len(fx_hist_130d) < 130:
-        _fail(f"MarketData invalid: fx.usdkrw_history_130d cleaned length < 130 (got={len(fx_hist_130d)})")
-
-    engine = AuroraX121()
-    for px in fx_hist_130d:
-        engine.kde.add(float(px))
-
-    fxw = engine.kde.fxw(fx_rate)
-
-    # KDE stats (debug/report)
-    fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
-
-    # P0-2 fail-fast: anchor가 분포 극하단으로 튀면 입력 시계열이 잘못 들어온 것으로 간주
-    anchor = float(fx_kde["anchor"])
-    p05 = float(fx_kde["p05"])
-    if anchor < (p05 - 10.0):
-        _fail(
-            f"P0-2_GUARD_FAIL: KDE anchor too low vs distribution. "
-            f"anchor={anchor:.1f}, p05={p05:.1f}. "
-            f"Check USDKRW 130D series window/trading-days integrity."
-        )
-
-    macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
-
-    ml_risk = compute_ml_risk(
-        vix=vix,
-        hy_oas=hy_oas,
-        fxw=fxw,
-        drawdown=drawdown,
-        yc_spread=yc_spread_bps,
-    )
-    ml_opp = compute_ml_opp(
-        vix=vix,
-        hy_oas=hy_oas,
-        fxw=fxw,
-        drawdown=drawdown,
-    )
-    ml_regime = compute_ml_regime(ml_risk=ml_risk, ml_opp=ml_opp)
-
-    systemic_level = compute_systemic_level(
-        hy_oas=hy_oas,
-        yc_spread=yc_spread_bps,
-        macro_score=macro_score,
-        ml_regime=ml_regime,
-        drawdown=drawdown,
-    )
-    systemic_bucket = determine_systemic_bucket(systemic_level)
-
-    return {
-        "fx_rate": fx_rate,
-        "fxw": fxw,
-        "fx_kde": fx_kde,
-        "fx_vol": fx_vol,
-        "vix": vix,
-        "hy_oas": hy_oas,
-        "drawdown": drawdown,
-        "dd_10y": dd_10y,
-        "dgs2": dgs2,
-        "dgs10": dgs10,
-        "yc_spread_bps": yc_spread_bps,
-        "ffr_upper": ffr_upper,
-        "pmi": pmi,
-        "cpi_yoy": cpi_yoy,
-        "unemployment": unemployment,
-        "macro_score": macro_score,
-        "ml_risk": ml_risk,
-        "ml_opp": ml_opp,
-        "ml_regime": ml_regime,
-        "systemic_level": systemic_level,
-        "systemic_bucket": systemic_bucket,
-    }
-
-
-def determine_state_from_signals(sig: Dict[str, float]) -> str:
-    systemic_bucket = sig["systemic_bucket"]
-    systemic_level = sig["systemic_level"]
-    vix = sig["vix"]
-    fx_vol = sig.get("fx_vol", 0.0)
-    ml_risk = sig["ml_risk"]
-    dd = sig["drawdown"]  # negative
-
-    if systemic_bucket in ("C2", "C3") or systemic_level >= 0.70:
-        return "S3_HARD"
-
-    if fx_vol >= 0.02:
-        return "S2_HIGH_VOL"
-
-    if ml_risk >= 0.80 or vix >= 30.0 or dd <= -0.30:
-        return "S2_HIGH_VOL"
-
-    if ml_risk >= 0.60 or vix >= 22.0 or dd <= -0.10:
-        return "S1_MILD"
-
-    return "S0_NORMAL"
+        vix_alpha = 0.0  # VIX가 중간이면 변화 없음
+   
+    # Drawdown에 따른 조정
+    drawdown = signals["drawdown"]
+    if drawdown <= -0.3:
+        dd_alpha = -0.05  # 큰 하락은 자산 비중을 줄임
+    elif drawdown >= 0:
+        dd_alpha = 0.05  # 하락이 없거나 상승하면 비중을 늘림
+    else:
+        dd_alpha = 0.0
+   
+    # FXW에 따른 조정
+    fxw = signals["fxw"]
+    if fxw < 0.3:
+        fxw_alpha = -0.05  # FXW가 낮으면 리스크가 커져서 비중을 줄임
+    elif fxw > 0.7:
+        fxw_alpha = 0.05  # FXW가 높으면 안전하므로 비중을 늘림
+    else:
+        fxw_alpha = 0.0
+   
+    # ML_Risk에 따른 조정 (합성 리스크 지표 반영)
+    ml_risk = signals["ml_risk"]
+    if ml_risk >= 0.75:
+        ml_alpha = -0.05  # ML_Risk 높으면 전체 리스크 커져 비중 줄임
+    elif ml_risk <= 0.4:
+        ml_alpha = 0.05  # ML_Risk 낮으면 안전하므로 비중 늘림
+    else:
+        ml_alpha = 0.0
+   
+    # Systemic Bucket에 따른 조정 (시스템 리스크 반영)
+    systemic_bucket = signals["systemic_bucket"]
+    if systemic_bucket in ["C2", "C3"]:
+        sys_alpha = -0.05  # C2/C3 고위험 버킷에서 비중 줄임
+    elif systemic_bucket == "C0":
+        sys_alpha = 0.05  # C0 안전 버킷에서 비중 늘림
+    else:
+        sys_alpha = 0.0  # C1 중립 버킷에서 변화 없음
+   
+    # 각 자산군에 따른 가중치 계산 (ML_Risk / Systemic Bucket 반영 추가)
+    if asset == "SPX":
+        alpha = vix_alpha + dd_alpha + fxw_alpha + ml_alpha + sys_alpha
+    elif asset == "NDX":
+        alpha = (vix_alpha * 1.5) + (dd_alpha * 1.2) + (fxw_alpha * 1.3) + (ml_alpha * 1.4) + (sys_alpha * 1.2)  # NDX는 공격적, 리스크 조정 강하게
+    elif asset == "DIV":
+        alpha = (vix_alpha * 0.5) + (dd_alpha * 0.8) + (fxw_alpha * 0.7) + (ml_alpha * 0.6) + (sys_alpha * 0.5)  # DIV는 방어적, 리스크 조정 약하게
+   
+    # 최종 알파는 -0.1에서 0.1 사이로 제한 (과도한 tilt 방지)
+    alpha = max(-0.1, min(alpha, 0.1))
+   
+    return alpha
 
 
 def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
