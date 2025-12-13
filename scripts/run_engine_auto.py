@@ -274,84 +274,22 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-def load_cma_balance(path: Path = None) -> Dict[str, Any]:
-    if path is None:
-        path = DATA_DIR / "cma_balance.json"
-    if not path.exists():
-        raise FileNotFoundError(f"{path} 이 없습니다. 월초에 (a,b) 입력 파일을 커밋해야 합니다.")
-    obj = json.loads(path.read_text(encoding="utf-8"))
-    deployed = float(obj.get("deployed_krw", 0))
-    cash = float(obj.get("cash_krw", 0))
-    asof = str(obj.get("asof_yyyymm", ""))
-    ref_base = float(obj.get("ref_base_krw", 0))
-    return {
-        "asof_yyyymm": asof,
-        "deployed_krw": deployed,
-        "cash_krw": cash,
-        "ref_base_krw": ref_base,
-    }
+def load_latest_market() -> Dict[str, Any]:
+    """
+    마켓 데이터를 로드합니다. 최근 파일을 가져옵니다.
+    """
+    files = sorted(DATA_DIR.glob("market_data_20*.json"))
+    if not files:
+        raise FileNotFoundError("market_data_*.json 파일이 data/ 폴더에 없습니다.")
+    
+    latest = files[-1]
+    with latest.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
 
+    if not isinstance(raw, dict):
+        raise ValueError("마켓 데이터 JSON은 dict 여야 합니다.")
 
-def _find_latest_cma_state_file() -> Path | None:
-    files = sorted(DATA_DIR.glob("cma_state_20*.json"))
-    return files[-1] if files else None
-
-
-def compute_cma_overlay_section(
-    sig: Dict[str, float],
-    target_weights: Dict[str, float],
-) -> Dict[str, Any]:
-    bal = load_cma_balance()
-
-    today = datetime.now().strftime("%Y%m%d")
-    cma_state_path = DATA_DIR / f"cma_state_{today}.json"
-
-    if cma_state_path.exists():
-        prev_state = load_cma_state(cma_state_path)
-    else:
-        latest_prev = _find_latest_cma_state_file()
-        prev_state = load_cma_state(latest_prev) if latest_prev else None
-
-    dd_mag_3y = abs(float(sig.get("drawdown", 0.0)))
-    dd_10y = float(sig.get("dd_10y", 0.0))
-    state_name = determine_state_from_signals(sig)
-
-    out = plan_cma_action(
-        asof_yyyymm=bal["asof_yyyymm"],
-        deployed_krw=bal["deployed_krw"],
-        cash_krw=bal["cash_krw"],
-        operator_ref_base_krw=float(bal.get("ref_base_krw", 0.0)),
-        fxw=float(sig["fxw"]),
-        vix=float(sig["vix"]),
-        hy_oas=float(sig["hy_oas"]),
-        dd_mag_3y=dd_mag_3y,
-        long_term_dd_10y=dd_10y,
-        ml_risk=float(sig["ml_risk"]),
-        systemic_bucket=str(sig["systemic_bucket"]),
-        final_state_name=state_name,
-        prev_cma_state=prev_state,
-    )
-
-    save_cma_state(out["_state_obj"], cma_state_path)
-
-    suggested_exec = float(out["execution"]["suggested_exec_krw"])
-    alloc = allocate_risk_on(max(0.0, suggested_exec), target_weights)
-
-    basket = ["SPX", "NDX", "DIV", "EM", "ENERGY"]
-    denom = sum(max(0.0, float(target_weights.get(k, 0.0))) for k in basket)
-    risk_on_w = {
-        k: (max(0.0, float(target_weights.get(k, 0.0))) / denom if denom > 0 else 0.0)
-        for k in basket
-    }
-
-    return {
-        "state": state_name,
-        "snapshot": out["cma_snapshot"],
-        "tas": out["tas"],
-        "execution": out["execution"],
-        "allocation": alloc,
-        "risk_on_target_weights": risk_on_w,
-    }
+    return raw
 
 
 def write_daily_report(
@@ -366,7 +304,7 @@ def write_daily_report(
     yyyymmdd = today.strftime("%Y%m%d")
     out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
 
-    # 기존 레포트 항목
+    # 레포트 작성
     lines = []
     lines.append("# AURORA Rev12.4 Daily Report")
     lines.append("")
@@ -377,7 +315,6 @@ def write_daily_report(
     lines.append(f"- Timestamp(UTC): {meta.get('timestamp_utc')}")
     lines.append("")
 
-    # 시장 데이터 요약
     lines.append("## 1. Market Data Summary (FD inputs)")
     if sig.get("fx_rate"):
         lines.append(f"- USD/KRW (Sell Rate): {sig['fx_rate']:.2f}")
@@ -397,7 +334,6 @@ def write_daily_report(
     lines.append(f"- Suggested Execution: {cma_overlay['execution']['suggested_exec_krw']}")
     lines.append("")
 
-    # 포트폴리오 비중 출력
     lines.append("## 3. Target Weights (Portfolio 100%)")
     lines.append("| Asset   | Weight (%) |")
     lines.append("|---------|-----------:|")
@@ -409,12 +345,10 @@ def write_daily_report(
     lines.append(f"| **Total** | **{total*100:10.2f}** |")
     lines.append("")
 
-    # CMA Overlay Allocation (SPX, NDX, DIV, EM, ENERGY)
     lines.append("## 4. CMA Overlay Allocation")
     for key, value in cma_overlay['risk_on_target_weights'].items():
         lines.append(f"- {key}: {value*100:.2f}%")
     
-    # 최종 레포트 파일 저장
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[REPORT] Daily report written to: {out_path}")
 
