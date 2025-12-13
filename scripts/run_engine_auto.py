@@ -383,7 +383,7 @@ def write_daily_report(
     systemic_bucket = sig.get("systemic_bucket")
 
     lines = []
-    lines.append("# AURORA Rev12.1b Daily Report")
+    lines.append("# AURORA Rev12.4 Daily Report")
     lines.append("")
     lines.append(f"- Report Date: {today.isoformat()}")
     lines.append(f"- Engine Version: {meta.get('engine_version')}")
@@ -534,7 +534,7 @@ def main():
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
     meta = {
-        "engine_version": "AURORA-Rev12.1b",
+        "engine_version": "AURORA-Rev12.4",
         "git_commit": os.getenv("GITHUB_SHA", ""),
         "run_id": os.getenv("GITHUB_RUN_ID", ""),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
