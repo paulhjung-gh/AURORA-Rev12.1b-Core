@@ -381,8 +381,6 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
             "risk_on_target_weights": risk_on_alloc,
         }
 
-    def main():
-        # ... 기존 main 내용 ...
 def main():
     market = load_latest_market()
     sig = build_signals(market)
