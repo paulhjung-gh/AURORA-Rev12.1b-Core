@@ -483,13 +483,34 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
         return "S1_MILD"
     return "S0_NORMAL"
 
+def load_cma_state():
+    # data 폴더에서 최신 파일을 읽습니다.
+    cma_files = sorted(DATA_DIR.glob("cma_state_*.json"))
+    
+    if not cma_files:
+        print("[ERROR] CMA state files not found. Please ensure the file is present in the data folder.")
+        return None
+    
+    # 최신 파일을 선택
+    latest_cma_file = cma_files[-1]
+    print(f"[DEBUG] Loading CMA state from: {latest_cma_file}")
+
+    try:
+        with latest_cma_file.open("r", encoding="utf-8") as f:
+            cma_state = json.load(f)
+            print(f"[DEBUG] CMA state loaded successfully: {cma_state}")
+            return cma_state
+    except Exception as e:
+        print(f"[ERROR] Failed to load CMA state: {e}")
+        return None
+
+
 def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
     cma_state = load_cma_state()
 
-    # cma_state가 None인 경우를 처리
     if cma_state is None:
         _fail("CMA state is None. Please ensure the state is loaded correctly.")
-
+    
     today_str = datetime.now().strftime("%Y%m")
 
     tas_output = plan_cma_action(
@@ -524,6 +545,7 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
         },
         "risk_on_target_weights": risk_on_alloc,
     }
+
 
 def main():
     market = load_latest_market()
