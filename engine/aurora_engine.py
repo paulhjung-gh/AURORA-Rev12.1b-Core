@@ -9,28 +9,14 @@ from scipy.stats import gaussian_kde
 from collections import deque
 
 # ============================================
-# AuroraX Rev12.1b-KDE – Final Synced Engine (Python)
-# Full Deterministic Edition with KDE Dynamic Anchor
+# AuroraX Rev12.4 – Core Tilt Edition (based on Rev12.1b-KDE)
+# Full Deterministic Edition with KDE Dynamic Anchor + Core Internal Continuous Tilt
 #
-# Matches Governance Protocol (12.1b-KDE),
-# Whitepaper 12.1b-KDE, Market Data FD Spec,
-# ML Layer 12.1b, Systemic Layer 12.1b,
-# and RuleSet 12.1b-KDE.
-#
-# Notes:
-#   - All Signals inputs (fx, vix, fx_vol, drawdown,
-#     macro_score, ffr_upper, ml_* fields, systemic_level)
-#     are deterministically defined by upstream FD components:
-#       * FXW from USD/KRW sell-rate with KDE dynamic anchor
-#       * fx_vol from 21D log-return sigma (non-annualized)
-#       * drawdown from 3Y SPX window
-#       * macro_score from ISM/PMI/CPI YoY/Unemployment
-#       * ffr_upper from FRED DFEDTARU
-#   - Engine formulas themselves are unchanged from Rev12.1,
-#     ensuring strict backward compatibility while removing
-#     any external scalar input dependency.
+# Rev12.4 Change Log:
+#   - Core Equity 내부 연속형 tilt 추가 (Σα = 0 보장, 총 Core 비중 불변)
+#   - 신호: Yield Curve inversion, ML_Risk, VIX (sigmoid 기반 부드러운 반응)
+#   - Tilt 범위 제한 ±0.08 (8%)
 # ============================================
-
 
 class State(Enum):
     S3_HARD = auto()
@@ -40,14 +26,12 @@ class State(Enum):
     S0_NORMAL = auto()
     S7_REPAIR = auto()
 
-
 class ReversionMode(Enum):
     OFF = "off"
     SELL_ONLY = "sell_only"
     LIMITED = "limited"
     MONDAY_ONLY = "monday_only"
     FULL = "full"
-
 
 @dataclass
 class Signals:
@@ -62,14 +46,13 @@ class Signals:
     ml_regime: float = 0.5
     macro_score: float = 0.5
     ffr_upper: float = 5.0
-
+    yc_spread: float = 0.0  # 10Y - 2Y 추가 (Rev12.4 필요)
 
 @dataclass
 class Portfolio:
     weights: Dict[str, float]
     cma_balance: float
     state: State = State.S0_NORMAL
-
 
 @dataclass
 class Decision:
@@ -92,10 +75,6 @@ class KDE_AdaptiveFXW:
         self.buffer = deque(maxlen=window)
 
     def preload(self, fx_series) -> None:
-        """
-        ✅ 반드시 run 시작 시 130 trading days 시계열을 먼저 주입
-        fx_series: iterable of floats (oldest -> newest 권장)
-        """
         for fx in fx_series:
             self.add(fx)
 
@@ -106,25 +85,16 @@ class KDE_AdaptiveFXW:
             return
 
     def fxw(self, fx: float) -> float:
-        """
-        FXW = 1 / (1 + exp(alpha * (FX - anchor)))
-        anchor = pure KDE mode of buffer (>=2 samples)
-        """
         if len(self.buffer) < 2:
-            # ✅ preload가 정상이라면 여기에 거의 안 걸림
-            # 그래도 deterministic하게 처리하려면 예외를 던지는 편이 안전
             raise ValueError("FXW buffer not preloaded with sufficient history (need >=2, ideally 130).")
-
         data = np.asarray(self.buffer, dtype=float)
         kde = gaussian_kde(data)
         x = np.linspace(data.min() - 100.0, data.max() + 100.0, 1000)
         density = kde(x)
-        anchor = float(x[np.argmax(density)])  # pure KDE mode
-
+        anchor = float(x[np.argmax(density)])
         raw = self.alpha * (float(fx) - anchor)
         fxw_val = 1.0 / (1.0 + math.exp(raw))
         return max(0.0, min(1.0, fxw_val))
-
 
 # ========================= 메인 엔진 클래스 =========================
 class AuroraX121:
@@ -134,7 +104,6 @@ class AuroraX121:
             self.kde.preload(fx_history_130)
 
     def fxw(self, fx_rate: float) -> float:
-        # 최신값도 buffer에 포함시켜 rolling update
         self.kde.add(fx_rate)
         return self.kde.fxw(fx_rate)
 
@@ -214,3 +183,106 @@ class AuroraX121:
         if st == State.S7_REPAIR:
             return ReversionMode.MONDAY_ONLY
         return ReversionMode.FULL
+
+    # ==================== Rev12.4 추가: Core Internal Continuous Tilt ====================
+    def _core_tilt_alpha(self, signals: Signals) -> Dict[str, float]:
+        """
+        Core 내부 연속형 tilt 계산 (Rev12.4)
+        - YC inversion 강할수록 DIV +α / NDX -α
+        - ML_Risk 높을수록 DIV +α
+        - VIX 높을수록 DIV +α
+        - sigmoid로 부드러운 반응
+        - 총합 α = 0 보장
+        """
+        def sigmoid(z: float, k: float = 12.0) -> float:
+            return 1.0 / (1.0 + math.exp(-k * z))
+
+        # 1. Yield Curve inversion (10Y-2Y < 0 일수록 inversion 강함)
+        yc_inv = max(0.0, -signals.yc_spread / 100)  # bps 단위 가정, inversion 강도 0~1+
+        yc_alpha = 0.06 * sigmoid(yc_inv - 0.5)  # inversion 강할수록 +α
+
+        # 2. ML_Risk 높을수록 DIV 방어 tilt
+        ml_alpha = 0.05 * sigmoid(signals.ml_risk - 0.60)
+
+        # 3. VIX 높을수록 DIV 방어 tilt
+        vix_alpha = 0.04 * sigmoid((signals.vix - 20) / 10)
+
+        total_positive = yc_alpha + ml_alpha + vix_alpha
+
+        # SPX는 중립 buffer, NDX는 성장주라 -α 강하게
+        alpha_spx = 0.0
+        alpha_ndx = -total_positive * 1.2
+        alpha_div = total_positive * 1.8  # DIV에 강하게 집중
+
+        # 최대 ±8% 제한
+        alpha_spx = max(-0.08, min(0.08, alpha_spx))
+        alpha_ndx = max(-0.08, min(0.08, alpha_ndx))
+        alpha_div = max(-0.08, min(0.08, alpha_div))
+
+        # Σα = 0 강제 보정
+        sum_alpha = alpha_spx + alpha_ndx + alpha_div
+        if abs(sum_alpha) > 1e-6:
+            alpha_spx -= sum_alpha / 3
+            alpha_ndx -= sum_alpha / 3
+            alpha_div -= sum_alpha / 3
+
+        return {"SPX": alpha_spx, "NDX": alpha_ndx, "DIV": alpha_div}
+
+    def compute_portfolio_target(self, signals: Signals) -> Dict[str, float]:
+        """
+        Rev12.4: Core 내부 tilt 적용 버전
+        """
+        fxw = self.fxw(signals.fx)
+        systemic_bucket = self.systemic(signals.systemic_level)
+        sgov_floor = self.sgov_floor(
+            fxw=fxw,
+            fx_rate=signals.fx,
+            ffr=signals.ffr_upper,
+            ml_risk=signals.ml_risk,
+            systemic=systemic_bucket,
+        )
+        sat_weight = self.satellite_target(
+            systemic=systemic_bucket,
+            ml_opp=signals.ml_opp,
+            fxw=fxw,
+        )
+        dur_weight = self.duration_target(
+            macro_score=signals.macro_score,
+            fxw=fxw,
+            ml_risk=signals.ml_risk,
+        )
+
+        # Rev12.4 Core tilt 적용
+        tilt = self._core_tilt_alpha(signals)
+
+        core_base = {
+            "SPX": 0.525 + tilt["SPX"],
+            "NDX": 0.245 + tilt["NDX"],
+            "DIV": 0.230 + tilt["DIV"],
+        }
+
+        # Core 내부 normalize (총합 1 보장)
+        core_sum = sum(core_base.values())
+        core_alloc = {k: v / core_sum for k, v in core_base.items()}
+
+        em_w = sat_weight * (2.0 / 3.0)
+        en_w = sat_weight * (1.0 / 3.0)
+        gold_w = 0.05
+
+        weights = {
+            "SPX": core_alloc["SPX"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
+            "NDX": core_alloc["NDX"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
+            "DIV": core_alloc["DIV"] * (1.0 - gold_w - sgov_floor - sat_weight - dur_weight),
+            "EM": em_w,
+            "ENERGY": en_w,
+            "DURATION": dur_weight,
+            "SGOV": sgov_floor,
+            "GOLD": gold_w,
+        }
+
+        # 최종 전체 normalize (안전장치)
+        total = sum(weights.values())
+        if total > 0:
+            weights = {k: v / total for k, v in weights.items()}
+
+        return weights
