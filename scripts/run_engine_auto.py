@@ -33,9 +33,9 @@ DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
 # =========================
-# Rev12.2 Meta (single source of truth for report/json label)
+# Rev13.0 Meta (single source of truth for report/json label)
 # =========================
-ENGINE_VERSION = "AURORA Rev12.2"
+ENGINE_VERSION = "AURORA Rev13.0"
 
 # === Governance Protocol Clamp Values (운영 cap) ===
 GOV_MAX_SGOV = 0.80
@@ -557,7 +557,7 @@ def compute_portfolio_target(sig: Dict[str, float]) -> Dict[str, float]:
 
     core_weight = max(0.0, remaining - (sgov_floor + sat_weight + dur_weight))
 
-    # Core baseline (Rev12.1b/12.2/12.3 consistent)
+    # Core baseline
     core_config = {"SPX": 0.525, "NDX": 0.245, "DIV": 0.230}
     core_alloc = {k: core_weight * w for k, w in core_config.items()}
 
