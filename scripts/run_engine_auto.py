@@ -853,7 +853,7 @@ def main():
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
     meta = {
-        "engine_version": "AURORA-Rev12.1b",
+        "engine_version": "AURORA-Rev12.3",
         "git_commit": os.getenv("GITHUB_SHA", ""),
         "run_id": os.getenv("GITHUB_RUN_ID", ""),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
