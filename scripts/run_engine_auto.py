@@ -356,7 +356,6 @@ def compute_cma_overlay_section(
         long_term_dd_10y=sig.get("drawdown", 0.0),
         hy_oas=sig.get("hy_oas", 300.0),
         ml_risk=sig.get("ml_risk", 0.5),
-        state="S0_NORMAL",
         systemic_bucket=sig.get("systemic_bucket", "C0"),
     )
 
