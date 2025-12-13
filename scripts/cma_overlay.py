@@ -16,6 +16,17 @@ DATA_DIR = Path("data")
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+def fx_scale_from_fxw(fxw: float) -> float:
+    """
+    FXW 값에 따라 FX 스케일을 계산하는 함수
+    """
+    if fxw <= 0.2:
+        return 0.5  # 예시값, FXW가 낮을 때 스케일링
+    elif fxw <= 0.5:
+        return 0.75  # 예시값, FXW가 중간일 때 스케일링
+    else:
+        return 1.0  # 예시값, FXW가 높을 때 스케일링
+        
 
 def tas_threshold(vix: float, long_term_dd_10y: float, hy_oas: float) -> float:
     if vix >= 30:
