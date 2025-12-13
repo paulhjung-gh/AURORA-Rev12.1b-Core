@@ -9,26 +9,15 @@ from scipy.stats import gaussian_kde
 from collections import deque
 
 # ============================================
-# AuroraX Rev12.1b-KDE – Final Synced Engine (Python)
+# AuroraX Rev12.2 – Final Synced Engine (Python)
 # Full Deterministic Edition with KDE Dynamic Anchor
 #
-# Matches Governance Protocol (12.1b-KDE),
-# Whitepaper 12.1b-KDE, Market Data FD Spec,
-# ML Layer 12.1b, Systemic Layer 12.1b,
-# and RuleSet 12.1b-KDE.
+# Rev12.2: Defense layers retained, response coefficients dampened to reduce over-shielding.
 #
-# Notes:
-#   - All Signals inputs (fx, vix, fx_vol, drawdown,
-#     macro_score, ffr_upper, ml_* fields, systemic_level)
-#     are deterministically defined by upstream FD components:
-#       * FXW from USD/KRW sell-rate with KDE dynamic anchor
-#       * fx_vol from 21D log-return sigma (non-annualized)
-#       * drawdown from 3Y SPX window
-#       * macro_score from ISM/PMI/CPI YoY/Unemployment
-#       * ffr_upper from FRED DFEDTARU
-#   - Engine formulas themselves are unchanged from Rev12.1,
-#     ensuring strict backward compatibility while removing
-#     any external scalar input dependency.
+# Matches Governance Protocol (12.1b-KDE baseline),
+# Whitepaper 12.1b-KDE baseline,
+# Market Data FD Spec, ML Layer 12.1b, Systemic Layer 12.1b,
+# and RuleSet (must be updated to Rev12.2 coefficients).
 # ============================================
 
 
@@ -84,9 +73,11 @@ class Decision:
     updated_weights: Dict[str, float]
     notes: Dict[str, str] = field(default_factory=dict)
 
+
 # ==================== KDE 동적 Anchor 클래스 ====================
 class KDE_AdaptiveFXW:
-    def __init__(self, window: int = 130, alpha: float = 0.01):
+    def __init__(self, window: int = 130, alpha: float = 0.0075):
+        # Rev12.2 change: alpha 0.01 -> 0.0075
         self.window = window
         self.alpha = alpha
         self.buffer = deque(maxlen=window)
@@ -111,8 +102,6 @@ class KDE_AdaptiveFXW:
         anchor = pure KDE mode of buffer (>=2 samples)
         """
         if len(self.buffer) < 2:
-            # ✅ preload가 정상이라면 여기에 거의 안 걸림
-            # 그래도 deterministic하게 처리하려면 예외를 던지는 편이 안전
             raise ValueError("FXW buffer not preloaded with sufficient history (need >=2, ideally 130).")
 
         data = np.asarray(self.buffer, dtype=float)
@@ -129,7 +118,8 @@ class KDE_AdaptiveFXW:
 # ========================= 메인 엔진 클래스 =========================
 class AuroraX121:
     def __init__(self, fx_history_130=None):
-        self.kde = KDE_AdaptiveFXW(window=130)
+        # Rev12.2: ensure alpha is actually applied
+        self.kde = KDE_AdaptiveFXW(window=130, alpha=0.0075)
         if fx_history_130 is not None:
             self.kde.preload(fx_history_130)
 
@@ -148,8 +138,13 @@ class AuroraX121:
         base = max(0.22, 0.7 * (ffr / 100))
         fx_penalty = (1 - fxw) * 0.12
         k_penalty = 0.05 if fx_rate >= 1600 else 0.02 if fx_rate >= 1550 else 0.0
-        ml_penalty = max(0, ml_risk - 0.60) * 0.08
-        sys_penalty = {"C0":0, "C1":0.05, "C2":0.10, "C3":0.20}.get(systemic, 0)
+
+        # Rev12.2 change: ML_Risk -> SGOV scaling 0.08 -> 0.05
+        ml_penalty = max(0, ml_risk - 0.60) * 0.05
+
+        # Rev12.2 change: Systemic penalty reduction for C1/C2, keep C3
+        sys_penalty = {"C0": 0.0, "C1": 0.03, "C2": 0.06, "C3": 0.20}.get(systemic, 0.0)
+
         return min(0.80, max(0.22, base + fx_penalty + k_penalty + ml_penalty + sys_penalty))
 
     def satellite_target(self, systemic: str, ml_opp: float, fxw: float) -> float:

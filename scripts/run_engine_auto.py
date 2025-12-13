@@ -36,6 +36,11 @@ from scripts.cma_overlay import (
 DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "reports"
 
+# =========================
+# Rev12.2 Meta (single source of truth for report/json label)
+# =========================
+ENGINE_VERSION = "AURORA Rev12.2"
+
 # === Governance Protocol Clamp Values (운영 cap) ===
 GOV_MAX_SGOV = 0.80
 GOV_MAX_SAT  = 0.20
@@ -684,7 +689,7 @@ def write_daily_report(
     out_path = REPORTS_DIR / f"aurora_daily_report_{yyyymmdd}.md"
 
     lines = []
-    lines.append("# AURORA Daily Report")
+    lines.append(f"# {meta.get('engine_version', ENGINE_VERSION)} Daily Report")
     lines.append("")
     lines.append(f"- Report Date: {today.isoformat()}")
     lines.append(f"- Engine Version: {meta.get('engine_version')}")
@@ -770,9 +775,23 @@ def write_daily_report(
         lines.append(f"| {k:20s} | {float(alloc.get(k,0.0)):.0f} |")
     lines.append("")
 
+    # =========================
+    # Optional A: MDD 2종 병기 (값이 있을 때만 출력)
+    # =========================
+    core_mdd = sig.get("core_equity_mdd_ref")
+    total_mdd = sig.get("total_portfolio_mdd")
+
+    if core_mdd is not None or total_mdd is not None:
+        lines.append("## 6. MDD Reference (Optional)")
+        lines.append("")
+        if core_mdd is not None:
+            lines.append(f"- Core Equity MDD (reference): {core_mdd}")
+        if total_mdd is not None:
+            lines.append(f"- Total Portfolio MDD (investor-experienced): {total_mdd}")
+        lines.append("")
+
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[REPORT] Daily report written to: {out_path}")
-
 
 def main():
     market = load_latest_market()
@@ -802,8 +821,7 @@ def main():
     out_path = DATA_DIR / f"aurora_target_weights_{today}.json"
 
     meta = {
-        # 12.4는 폐기했다고 했으니, core 기준은 12.3-final로 두고 overlay만 보고서에 표시
-        "engine_version": "AURORA-Rev12.3-final (Core) + CMA Overlay",
+        "engine_version": ENGINE_VERSION,
         "git_commit": os.getenv("GITHUB_SHA", ""),
         "run_id": os.getenv("GITHUB_RUN_ID", ""),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

@@ -1,7 +1,7 @@
 # AURORA Daily Report
 
 - Report Date: 2025-12-13
-- Engine Version: AURORA-Rev12.3-final (Core) + CMA Overlay
+- Engine Version: AURORA-Rev13.0-final (Core) + CMA Overlay
 - Git Commit: 142a6cd92f071bb40fcbce5264bb2d64611c0e9d
 - Run ID: 20193532845
 - Timestamp(UTC): 2025-12-13T14:38:23.142665+00:00
