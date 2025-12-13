@@ -344,6 +344,45 @@ def determine_state_from_signals(sig: Dict[str, float]) -> str:
             return "S1_MILD"
         return "S0_NORMAL"
     
+    def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
+        """
+        실제 CMA Overlay 계산 (cma_overlay.py 함수들 활용)
+        """
+        cma_state = load_cma_state()
+
+        tas_output = plan_cma_action(
+            vix=sig.get("vix", 15.0),
+            long_term_dd_10y=sig.get("drawdown", 0.0),
+            hy_oas=sig.get("hy_oas", 300.0),
+            ml_risk=sig.get("ml_risk", 0.5),
+            state="S0_NORMAL",
+            systemic_bucket=sig.get("systemic_bucket", "C0"),
+        )
+
+        exec_delta = tas_output.suggested_exec_krw(cma_state.cash_krw)
+
+        risk_on_alloc = allocate_risk_on(exec_delta, weights)
+
+        return {
+            "cma_snapshot": {
+                "ref_base_krw": cma_state.ref_base_krw,
+                "s0_count": cma_state.s0_count,
+                "last_s0_yyyymm": cma_state.last_s0_yyyymm,
+                "total_cma_krw": cma_state.deployed_krw + cma_state.cash_krw,
+            },
+            "tas": {
+                "threshold": tas_output.final_threshold,
+                "deploy_factor": tas_output.deploy_factor,
+                "target_deploy_krw": tas_output.deploy_factor * (cma_state.deployed_krw + cma_state.cash_krw),
+            },
+            "execution": {
+                "suggested_exec_krw": exec_delta,
+            },
+            "risk_on_target_weights": risk_on_alloc,
+        }
+
+    def main():
+        # ... 기존 main 내용 ...
 def main():
     market = load_latest_market()
     sig = build_signals(market)
