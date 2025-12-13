@@ -529,6 +529,28 @@ def load_cma_state():
         print(f"[ERROR] Failed to load CMA state: {e}")
         return None
 
+def determine_final_state_name(sig: Dict[str, float]) -> str:
+    """
+    위험도를 기반으로 final_state_name을 동적으로 계산합니다.
+    - ml_risk: 머신러닝 리스크 값
+    - systemic_bucket: 시스템적 리스크 상태 (C0, C1, C2, C3)
+    - vix: 변동성 지표 (VIX)
+    """
+    # 예시 로직: ml_risk, systemic_bucket, vix 값을 바탕으로 상태를 설정
+    ml_risk = sig.get("ml_risk", 0.0)
+    systemic_bucket = sig.get("systemic_bucket", "C0")
+    vix = sig.get("vix", 0.0)
+
+    # 상태 계산 로직
+    if systemic_bucket == "C3" or ml_risk > 0.85:
+        return "S3_HARD"
+    elif systemic_bucket == "C2" or ml_risk > 0.75:
+        return "S3_SOFT"
+    elif vix > 35:
+        return "S2_HIGH_VOL"
+    elif ml_risk > 0.65:
+        return "S1_MILD"
+    return "S0_NORMAL"
 
 
 def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
