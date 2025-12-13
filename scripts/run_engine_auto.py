@@ -162,6 +162,9 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
         engine.kde.add(float(px))
     fxw = engine.kde.fxw(fx_rate)
 
+    # `fxw`를 market 데이터에 추가
+    market["fxw"] = fxw  # 이렇게 추가
+
     fx_kde = compute_fx_kde_anchor_and_stats(fx_hist_130d)
 
     macro_score = compute_macro_score_from_market(pmi, cpi_yoy, unemployment)
@@ -195,7 +198,7 @@ def build_signals(market: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "fx_rate": fx_rate,
-        "fxw": fxw,
+        "fxw": fxw,  # fxw 포함
         "fx_kde": fx_kde,
         "fx_vol": fx_vol,
         "vix": vix,
