@@ -1,10 +1,10 @@
 {
   "date": "20251213",
   "meta": {
-    "engine_version": "AURORA-Rev12.1b",
-    "git_commit": "9e7da8af5c077fff16e8cda24195606205af7940",
-    "run_id": "20185105192",
-    "timestamp_utc": "2025-12-13T02:05:13.265545+00:00"
+    "engine_version": "AURORA Rev12.2",
+    "git_commit": "b5a5f35301534e980d9f054fa11484d5fd630240",
+    "run_id": "20185689689",
+    "timestamp_utc": "2025-12-13T02:54:11.879498+00:00"
   },
   "signals": {
     "fx_rate": 1470.8499755859375,

@@ -1,10 +1,10 @@
-# AURORA Rev12.1b Daily Report
+# AURORA Rev12.2 Daily Report
 
 - Report Date: 2025-12-13
-- Engine Version: AURORA-Rev12.1b
-- Git Commit: 9e7da8af5c077fff16e8cda24195606205af7940
-- Run ID: 20185105192
-- Timestamp(UTC): 2025-12-13T02:05:13.265545+00:00
+- Engine Version: AURORA Rev12.2
+- Git Commit: b5a5f35301534e980d9f054fa11484d5fd630240
+- Run ID: 20185689689
+- Timestamp(UTC): 2025-12-13T02:54:11.879498+00:00
 
 ## 1. Market Data Summary (FD inputs)
 - USD/KRW (Sell Rate): 1470.85
@@ -62,3 +62,8 @@
 | DIV                  | 0 |
 | EM                   | 0 |
 | ENERGY               | 0 |
+
+## 6. MDD Reference (Optional)
+
+- Core Equity MDD (reference): N/A
+- Total Portfolio MDD (investor-experienced): N/A
