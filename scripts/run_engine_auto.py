@@ -499,10 +499,23 @@ def load_cma_state():
         with latest_cma_file.open("r", encoding="utf-8") as f:
             cma_state = json.load(f)
             print(f"[DEBUG] CMA state loaded successfully: {cma_state}")
+
+            # cma_balance에서 deployed_krw 값 확인
+            if 'cma_balance' not in cma_state:
+                print("[ERROR] 'cma_balance' not found in CMA state.")
+                return None
+
+            cma_balance = cma_state['cma_balance']
+            if 'deployed_krw' not in cma_balance:
+                print("[ERROR] 'deployed_krw' is missing in 'cma_balance'.")
+                return None
+            
+            print(f"[DEBUG] deployed_krw: {cma_balance['deployed_krw']}")
             return cma_state
     except Exception as e:
         print(f"[ERROR] Failed to load CMA state: {e}")
         return None
+
 
 
 def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Any]:
@@ -510,41 +523,48 @@ def compute_cma_overlay_section(sig: Dict[str, float], weights: Dict[str, float]
 
     if cma_state is None:
         _fail("CMA state is None. Please ensure the state is loaded correctly.")
+
+    # cma_balance에서 deployed_krw 값 가져오기
+    cma_balance = cma_state.get('cma_balance', {})
+    deployed_krw = cma_balance.get('deployed_krw', 0.0)
+    if deployed_krw == 0.0:
+        print("[ERROR] 'deployed_krw' is 0. Please check the cma_balance in the CMA state.")
     
     today_str = datetime.now().strftime("%Y%m")
 
     tas_output = plan_cma_action(
         today_str,
-        cma_state.deployed_krw,
-        cma_state.cash_krw,
-        cma_state.ref_base_krw,
+        deployed_krw,  # deployed_krw를 사용
+        cma_state['cma_balance']['cash_krw'],  # cash_krw도 cma_balance에서 가져옵니다.
+        cma_state['cma_balance']['ref_base_krw'],
         sig["fxw"],
         abs(sig["drawdown"]),
         "S0_NORMAL",
         cma_state,
     )
 
-    exec_delta = tas_output.suggested_exec_krw(cma_state.cash_krw)
+    exec_delta = tas_output.suggested_exec_krw(cma_state['cma_balance']['cash_krw'])
 
     risk_on_alloc = allocate_risk_on(exec_delta, weights)
 
     return {
         "cma_snapshot": {
-            "ref_base_krw": cma_state.ref_base_krw,
-            "s0_count": cma_state.s0_count,
-            "last_s0_yyyymm": cma_state.last_s0_yyyymm,
-            "total_cma_krw": cma_state.deployed_krw + cma_state.cash_krw,
+            "ref_base_krw": cma_state['cma_balance']['ref_base_krw'],
+            "s0_count": cma_state['cma_balance']['s0_count'],
+            "last_s0_yyyymm": cma_state['cma_balance']['last_s0_yyyymm'],
+            "total_cma_krw": deployed_krw + cma_state['cma_balance']['cash_krw'],
         },
         "tas": {
             "threshold": tas_output.final_threshold,
             "deploy_factor": tas_output.deploy_factor,
-            "target_deploy_krw": tas_output.deploy_factor * (cma_state.deployed_krw + cma_state.cash_krw),
+            "target_deploy_krw": tas_output.deploy_factor * (deployed_krw + cma_state['cma_balance']['cash_krw']),
         },
         "execution": {
             "suggested_exec_krw": exec_delta,
         },
         "risk_on_target_weights": risk_on_alloc,
     }
+
 
 
 def main():
