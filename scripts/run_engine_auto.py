@@ -803,7 +803,7 @@ def main():
 
     meta = {
         # 12.4는 폐기했다고 했으니, core 기준은 12.3-final로 두고 overlay만 보고서에 표시
-        "engine_version": "AURORA-Rev13.0 (Core) + CMA Overlay 1.1",
+        "engine_version": "AURORA-Rev12.3 (Core) + CMA Overlay 1.1",
         "git_commit": os.getenv("GITHUB_SHA", ""),
         "run_id": os.getenv("GITHUB_RUN_ID", ""),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
